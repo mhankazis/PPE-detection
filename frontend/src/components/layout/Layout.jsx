@@ -1,12 +1,13 @@
 import { useState } from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
-import { LayoutDashboard, Video, FileText, Settings, ShieldAlert, LogOut } from "lucide-react"
+import { LayoutDashboard, Video, FileText, Settings, ShieldAlert, LogOut, ImagePlus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "../mode-toggle"
 import { useAuth } from "../../contexts/AuthContext"
 
 const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+    { name: 'Upload Image', href: '/upload', icon: ImagePlus },
     { name: 'Live Feed', href: '/live', icon: Video },
     { name: 'Violation Logs', href: '/logs', icon: FileText },
     { name: 'Settings', href: '/settings', icon: Settings },
