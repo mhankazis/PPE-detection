@@ -9,8 +9,7 @@ import { ThemeProvider } from "./components/theme-provider"
 import { AuthProvider } from "./contexts/AuthContext"
 import { ProtectedRoute } from "./components/ProtectedRoute"
 
-// Dummy views
-function Settings() { return <div className="p-8"><h1 className="text-3xl font-bold">Settings</h1></div> }
+import Settings from "./components/views/Settings"
 
 function App() {
   return (

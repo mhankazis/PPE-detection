@@ -30,6 +30,46 @@ const mockLogs = [
 
 export default function Logs() {
     const [selectedLog, setSelectedLog] = useState(null)
+    const [searchTerm, setSearchTerm] = useState("")
+    const [dateFrom, setDateFrom] = useState("")
+    const [dateTo, setDateTo] = useState("")
+
+    const filteredLogs = mockLogs.filter(log => {
+        const matchesSearch = log.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.camera.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.workerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.id.toLowerCase().includes(searchTerm.toLowerCase());
+
+        let matchesDate = true;
+        if (dateFrom) {
+            matchesDate = matchesDate && log.date >= dateFrom;
+        }
+        if (dateTo) {
+            matchesDate = matchesDate && log.date <= dateTo;
+        }
+
+        return matchesSearch && matchesDate;
+    })
+
+    const handleExportCSV = () => {
+        const headers = ["ID", "Date", "Time", "Camera", "Type", "Worker ID", "Severity"];
+        const rows = filteredLogs.map(log => {
+            // Format date to dd/mm/yyyy
+            const [year, month, day] = log.date.split("-");
+            const formattedDate = `${day}/${month}/${year}`;
+            return [log.id, formattedDate, log.time, log.camera, `"${log.type}"`, log.workerId, log.severity]
+        });
+        const csvContent = "data:text/csv;charset=utf-8,"
+            + headers.join(",") + "\n"
+            + rows.map(e => e.join(",")).join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `violation_logs_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     return (
         <div className="p-8 space-y-8 animate-in fade-in duration-500">
@@ -38,22 +78,42 @@ export default function Logs() {
                     <h1 className="text-3xl font-bold tracking-tight">Violation Logs</h1>
                     <p className="text-muted-foreground mt-1">Review historical PPE compliance violations.</p>
                 </div>
-                <div className="flex space-x-3">
-                    <Button variant="outline" className="gap-2">
-                        <Filter className="w-4 h-4" /> Filter
-                    </Button>
-                    <Button variant="outline" className="gap-2">
-                        <Calendar className="w-4 h-4" /> Date Range
-                    </Button>
-                    <Button className="gap-2">
-                        <Download className="w-4 h-4" /> Export CSV
-                    </Button>
-                </div>
             </div>
 
             <Card>
-                <CardHeader className="py-4 border-b bg-muted/50">
+                <CardHeader className="py-4 border-b bg-muted/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <CardTitle className="text-lg">Recent Records</CardTitle>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="relative">
+                            <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="text"
+                                placeholder="Filter logs..."
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pl-9 sm:w-[200px]"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-muted-foreground hidden sm:block" />
+                            <input
+                                type="date"
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                            />
+                            <span className="text-muted-foreground">-</span>
+                            <input
+                                type="date"
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                            />
+                        </div>
+                        <Button className="gap-2" onClick={handleExportCSV}>
+                            <Download className="w-4 h-4" /> Export CSV
+                        </Button>
+                    </div>
                 </CardHeader>
                 <CardContent className="p-0">
                     <Table>
@@ -69,11 +129,22 @@ export default function Logs() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {mockLogs.map((log) => (
+                            {filteredLogs.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="h-24 text-center">
+                                        No logs found matching your criteria.
+                                    </TableCell>
+                                </TableRow>
+                            ) : filteredLogs.map((log) => (
                                 <TableRow key={log.id} className="cursor-default hover:bg-muted/50 transition-colors">
                                     <TableCell className="font-medium font-mono text-sm">{log.id}</TableCell>
                                     <TableCell>
-                                        <div className="font-medium">{log.date}</div>
+                                        <div className="font-medium">
+                                            {(() => {
+                                                const [year, month, day] = log.date.split("-");
+                                                return `${day}/${month}/${year}`;
+                                            })()}
+                                        </div>
                                         <div className="text-xs text-muted-foreground">{log.time}</div>
                                     </TableCell>
                                     <TableCell>{log.camera}</TableCell>
@@ -115,7 +186,10 @@ export default function Logs() {
                                                             <p className="text-sm font-medium text-muted-foreground">Detection Details</p>
                                                             <div className="mt-2 space-y-1">
                                                                 <p className="text-sm"><span className="font-medium">Camera:</span> {selectedLog?.camera}</p>
-                                                                <p className="text-sm"><span className="font-medium">Timestamp:</span> {selectedLog?.date} {selectedLog?.time}</p>
+                                                                <p className="text-sm"><span className="font-medium">Timestamp:</span> {(() => {
+                                                                    const [year, month, day] = selectedLog?.date ? selectedLog.date.split("-") : ["", "", ""];
+                                                                    return selectedLog?.date ? `${day}/${month}/${year}` : "";
+                                                                })()} {selectedLog?.time}</p>
                                                             </div>
                                                         </div>
                                                         <div>
@@ -138,7 +212,7 @@ export default function Logs() {
             </Card>
 
             <div className="flex items-center justify-between px-2">
-                <p className="text-sm text-muted-foreground">Showing 1 to 6 of 142 entries</p>
+                <p className="text-sm text-muted-foreground">Showing {filteredLogs.length} entries</p>
                 <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled>Previous</Button>
                     <Button variant="outline" size="sm">Next</Button>

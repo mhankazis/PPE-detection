@@ -6,7 +6,7 @@ export default function Dashboard() {
     const stats = [
         { title: "Total Violations Today", value: "24", icon: AlertCircle, change: "+12%", color: "text-red-500" },
         { title: "Active Cameras", value: "8/10", icon: Camera, change: "All systems operational", color: "text-blue-500" },
-        { title: "Workers Detected", value: "142", icon: Users, change: "Current shift", color: "text-indigo-500" },
+        { title: "Students Detected", value: "142", icon: Users, change: "Current shift", color: "text-indigo-500" },
         { title: "Compliance Rate", value: "94%", icon: CheckCircle2, change: "+2.4% from yesterday", color: "text-green-500" },
     ]
 
