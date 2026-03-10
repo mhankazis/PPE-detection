@@ -47,17 +47,13 @@ export default function LiveFeed() {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
                 {/* Video Player */}
                 <Card className="lg:col-span-3 flex flex-col overflow-hidden border-2 border-muted bg-black/5 dark:bg-black/40">
-                    <div className="flex-1 relative flex items-center justify-center min-h-[400px]">
-                        {/* Placeholder for actual Video Stream 
-                Normally this would be an <img src="http://localhost:8000/video_feed" /> or WebRTC player
-            */}
-                        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541888086425-d81bb19460b5?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-40"></div>
-
-                        <div className="relative z-10 text-center">
-                            <Camera className="w-16 h-16 mx-auto mb-4 text-white/50" />
-                            <h3 className="text-xl font-medium text-white">Stream Placeholder</h3>
-                            <p className="text-white/60 text-sm mt-2">backend /api/video_feed will be connected here</p>
-                        </div>
+                    <div className="flex-1 relative flex items-center justify-center min-h-[400px] bg-black overflow-hidden">
+                        {/* Live Stream from backend */}
+                        <img
+                            src="http://localhost:8000/api/video_feed"
+                            alt="Live CCTV Feed"
+                            className="absolute inset-0 w-full h-full object-contain z-10"
+                        />
 
                         {/* Simulated Bounding Box */}
                         <div className="absolute top-[30%] left-[40%] w-[120px] h-[240px] border-2 border-red-500/80 bg-red-500/10 rounded pointer-events-none">
