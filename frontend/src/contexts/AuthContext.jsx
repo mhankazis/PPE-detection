@@ -15,19 +15,42 @@ export function AuthProvider({ children }) {
         setLoading(false);
     }, []);
 
-    const login = (username, password) => {
-        // For now, allow any non-empty login
-        if (username && password) {
-            setIsAuthenticated(true);
-            localStorage.setItem('isAuthenticated', 'true');
-            return true;
+    const login = async (username, password) => {
+        try {
+            const formData = new URLSearchParams();
+            formData.append('username', username);
+            formData.append('password', password);
+
+            const response = await fetch('http://localhost:8000/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: formData.toString(),
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setIsAuthenticated(true);
+                localStorage.setItem('isAuthenticated', 'true');
+                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('role', data.role);
+                return { success: true };
+            } else {
+                const errorData = await response.json();
+                return { success: false, message: errorData.detail || 'Login failed' };
+            }
+        } catch (error) {
+            console.error("Login error:", error);
+            return { success: false, message: 'Server connection failed' };
         }
-        return false;
     };
 
     const logout = () => {
         setIsAuthenticated(false);
         localStorage.removeItem('isAuthenticated');
+        localStorage.removeItem('token');
+        localStorage.removeItem('role');
     };
 
     return (

@@ -11,13 +11,26 @@ export default function Login() {
     const { login } = useAuth();
     const navigate = useNavigate();
 
-    const handleSubmit = (e) => {
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        if (login(username, password)) {
+        setIsLoading(true);
+        setError('');
+        
+        if (!username || !password) {
+            setError('Please enter both username and password.');
+            setIsLoading(false);
+            return;
+        }
+
+        const result = await login(username, password);
+        if (result.success) {
             navigate('/');
         } else {
-            setError('Please enter both username and password.');
+            setError(result.message || 'Login failed.');
         }
+        setIsLoading(false);
     };
 
     return (
@@ -89,10 +102,11 @@ export default function Login() {
 
                     <button
                         type="submit"
-                        className="group inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground shadow-lg hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-all hover:scale-[1.02] active:scale-[0.98] gap-2"
+                        disabled={isLoading}
+                        className="group inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground shadow-lg hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-all hover:scale-[1.02] active:scale-[0.98] gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                     >
-                        Sign In
-                        <LogIn className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                        {isLoading ? 'Signing In...' : 'Sign In'}
+                        {!isLoading && <LogIn className="h-4 w-4 transition-transform group-hover:translate-x-1" />}
                     </button>
                 </form>
 

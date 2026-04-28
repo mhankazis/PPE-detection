@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import {
     Table,
     TableBody,
@@ -18,21 +18,14 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react"
+import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react"
 
 const availableViolations = ["No Helmet", "No Vest", "No Gloves", "No Goggles", "Unauthorized Area"]
 
-const initialMockLogs = [
-    { id: "V-1042", date: "2023-10-24", time: "10:24 AM", camera: "Cam 04", type: "No Helmet", student: "S-294", severity: "High", status: "Belum Dihukum" },
-    { id: "V-1041", date: "2023-10-24", time: "10:15 AM", camera: "Cam 02", type: "No Vest", student: "S-112", severity: "Medium", status: "Sudah Dihukum" },
-    { id: "V-1040", date: "2023-10-24", time: "09:50 AM", camera: "Cam 04", type: "No Helmet, No Vest", student: "Unknown", severity: "Critical", status: "Belum Dihukum" },
-    { id: "V-1039", date: "2023-10-24", time: "09:12 AM", camera: "Cam 01", type: "No Gloves", student: "S-550", severity: "Low", status: "Sudah Dihukum" },
-    { id: "V-1038", date: "2023-10-23", time: "15:44 PM", camera: "Cam 03", type: "Unauthorized Area", student: "S-104", severity: "Critical", status: "Belum Dihukum" },
-    { id: "V-1037", date: "2023-10-23", time: "14:20 PM", camera: "Cam 02", type: "No Goggles", student: "S-881", severity: "Medium", status: "Sudah Dihukum" },
-]
-
 export default function Logs() {
-    const [logs, setLogs] = useState(initialMockLogs)
+    const [logs, setLogs] = useState([])
+    const [studentsList, setStudentsList] = useState([])
+    const [isLoading, setIsLoading] = useState(true)
     const [selectedLog, setSelectedLog] = useState(null)
     const [searchTerm, setSearchTerm] = useState("")
     const [dateFrom, setDateFrom] = useState("")
@@ -51,6 +44,49 @@ export default function Logs() {
     const [formData, setFormData] = useState({
         id: "", date: "", time: "", camera: "", type: "", student: "", severity: "Low", status: "Belum Dihukum"
     })
+
+    const [selectedImage, setSelectedImage] = useState(null)
+    const [previewUrl, setPreviewUrl] = useState(null)
+    const [removeImage, setRemoveImage] = useState(false)
+    const fileInputRef = useRef(null)
+
+    const fetchLogs = async () => {
+        setIsLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch('http://localhost:8000/api/logs', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setLogs(data);
+            }
+        } catch (error) {
+            console.error("Error fetching logs", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const fetchStudents = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch('http://localhost:8000/api/students', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setStudentsList(data);
+            }
+        } catch (error) {
+            console.error("Error fetching students", error);
+        }
+    };
+
+    useEffect(() => {
+        fetchLogs();
+        fetchStudents();
+    }, []);
 
     const handleSort = (key) => {
         let direction = 'asc';
@@ -127,32 +163,131 @@ export default function Logs() {
 
     const handleAdd = () => {
         setFormData({ id: "", date: new Date().toISOString().split('T')[0], time: "", camera: "", type: "", student: "", severity: "Low", status: "Belum Dihukum" })
+        setSelectedImage(null)
+        setPreviewUrl(null)
+        setRemoveImage(false)
         setIsAddOpen(true)
     }
 
     const handleEdit = (log) => {
-        setFormData(log)
+        setFormData({
+            ...log,
+            student: log.student_id ? log.student_id.toString() : "",
+            time: log.time_input || log.time
+        })
+        setSelectedImage(null)
+        setRemoveImage(false)
+        if (log.image_path) {
+            setPreviewUrl(`http://localhost:8000/${log.image_path.replace(/\\/g, '/')}`)
+        } else {
+            setPreviewUrl(null)
+        }
         setIsEditOpen(true)
     }
 
-    const handleDelete = (id) => {
+    const clearImage = () => {
+        if (previewUrl && previewUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(previewUrl)
+        }
+        setSelectedImage(null)
+        setPreviewUrl(null)
+        setRemoveImage(true)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+
+    const handleImageChange = (e) => {
+        const file = e.target.files?.[0]
+        if (file) {
+            setSelectedImage(file)
+            setPreviewUrl(URL.createObjectURL(file))
+            setRemoveImage(false)
+        }
+    }
+
+    const handleDelete = async (id) => {
         if (window.confirm("Are you sure you want to delete this log?")) {
-            setLogs(logs.filter(log => log.id !== id))
+            try {
+                const token = localStorage.getItem('token');
+                await fetch(`http://localhost:8000/api/logs/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                fetchLogs();
+            } catch (err) {
+                console.error("Failed to delete", err);
+            }
         }
     }
 
-    const handleSaveAdd = () => {
-        const newLog = {
-            ...formData,
-            id: `V-${1000 + Math.floor(Math.random() * 9000)}`
+    const handleSaveAdd = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const payload = new FormData();
+            payload.append('violation_type', formData.type || '');
+            payload.append('severity', formData.severity);
+            payload.append('student_id', formData.student || 'null');
+            payload.append('camera_id', 'null'); // default
+            
+            if (selectedImage) {
+                payload.append('file', selectedImage);
+            }
+
+            const response = await fetch('http://localhost:8000/api/logs', {
+                method: 'POST',
+                headers: { 
+                    'Authorization': `Bearer ${token}`
+                },
+                body: payload
+            });
+            
+            if (response.ok) {
+                setIsAddOpen(false);
+                fetchLogs();
+            } else {
+                const err = await response.json();
+                console.error("API Error:", err);
+                alert("Gagal menyimpan data: " + (err.detail || JSON.stringify(err)));
+            }
+        } catch (err) {
+            console.error("Failed to add", err);
+            alert("Terjadi kesalahan jaringan.");
         }
-        setLogs([newLog, ...logs])
-        setIsAddOpen(false)
     }
 
-    const handleSaveEdit = () => {
-        setLogs(logs.map(log => log.id === formData.id ? formData : log))
-        setIsEditOpen(false)
+    const handleSaveEdit = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const payload = new FormData();
+            payload.append('violation_type', formData.type || '');
+            payload.append('severity', formData.severity);
+            payload.append('status', formData.status);
+            payload.append('student_id', formData.student || 'null');
+            payload.append('remove_image', removeImage.toString());
+            
+            if (selectedImage) {
+                payload.append('file', selectedImage);
+            }
+
+            const response = await fetch(`http://localhost:8000/api/logs/${formData.id}`, {
+                method: 'PUT',
+                headers: { 
+                    'Authorization': `Bearer ${token}`
+                },
+                body: payload
+            });
+            
+            if (response.ok) {
+                setIsEditOpen(false);
+                fetchLogs();
+            } else {
+                const err = await response.json();
+                console.error("API Error:", err);
+                alert("Gagal mengubah data: " + (err.detail || JSON.stringify(err)));
+            }
+        } catch (err) {
+            console.error("Failed to edit", err);
+            alert("Terjadi kesalahan jaringan.");
+        }
     }
 
     const renderForm = () => {
@@ -182,8 +317,8 @@ export default function Logs() {
                 </div>
                 <div className="space-y-2">
                     <label className="text-sm font-medium">Camera</label>
-                    <input className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                        value={formData.camera} onChange={(e) => setFormData({ ...formData, camera: e.target.value })} />
+                    <input className="flex h-9 w-full rounded-md border border-input bg-muted px-3 py-1 text-sm shadow-sm cursor-not-allowed"
+                        value="Main Camera" readOnly disabled />
                 </div>
                 <div className="space-y-2">
                     <label className="text-sm font-medium">Violation Type</label>
@@ -206,8 +341,13 @@ export default function Logs() {
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                         <label className="text-sm font-medium">Student</label>
-                        <input className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                            value={formData.student} onChange={(e) => setFormData({ ...formData, student: e.target.value })} />
+                        <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                            value={formData.student} onChange={(e) => setFormData({ ...formData, student: e.target.value })}>
+                            <option value="">Unknown / None</option>
+                            {studentsList.map(s => (
+                                <option key={s.id} value={s.id}>{s.name} ({s.nim})</option>
+                            ))}
+                        </select>
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm font-medium">Severity</label>
@@ -227,6 +367,30 @@ export default function Logs() {
                         <option value="Belum Dihukum">Belum Dihukum</option>
                         <option value="Sudah Dihukum">Sudah Dihukum</option>
                     </select>
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Upload Image Snapshot</label>
+                    <input 
+                        type="file" 
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        ref={fileInputRef}
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm file:border-0 file:bg-transparent file:text-sm file:font-medium"
+                    />
+                    {previewUrl && (
+                        <div className="mt-2 relative aspect-video w-full max-w-[200px] overflow-hidden rounded-md border group">
+                            <img src={previewUrl} alt="Preview" className="object-cover w-full h-full" />
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <button 
+                                    type="button" 
+                                    onClick={clearImage}
+                                    className="p-2 bg-destructive text-destructive-foreground rounded-full hover:bg-destructive/90"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         )
@@ -392,7 +556,13 @@ export default function Logs() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {paginatedLogs.length === 0 ? (
+                            {isLoading ? (
+                                <TableRow>
+                                    <TableCell colSpan={8} className="h-24 text-center">
+                                        Memuat data...
+                                    </TableCell>
+                                </TableRow>
+                            ) : paginatedLogs.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={8} className="h-24 text-center">
                                         No logs found matching your criteria.
@@ -445,13 +615,22 @@ export default function Logs() {
                                                     </DialogHeader>
                                                     <div className="mt-4">
                                                         <div className="aspect-video w-full bg-muted rounded-lg overflow-hidden relative group">
-                                                            <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541888086425-d81bb19460b5?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center brightness-75"></div>
-                                                            {/* Bounding box mock */}
-                                                            <div className="absolute top-[25%] left-[35%] w-[140px] h-[280px] border-[3px] border-red-500/90 rounded pointer-events-none">
-                                                                <div className="absolute -top-7 left-[-3px] bg-red-500/90 text-white text-sm font-medium px-2 py-0.5 rounded shadow-sm">
-                                                                    {selectedLog?.type}
-                                                                </div>
-                                                            </div>
+                                                            {selectedLog?.image_path ? (
+                                                                <img 
+                                                                    src={`http://localhost:8000/${selectedLog.image_path.replace(/\\/g, '/')}`} 
+                                                                    alt="Violation snapshot" 
+                                                                    className="w-full h-full object-contain bg-black/90"
+                                                                />
+                                                            ) : (
+                                                                <>
+                                                                    <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541888086425-d81bb19460b5?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center brightness-75"></div>
+                                                                    <div className="absolute top-[25%] left-[35%] w-[140px] h-[280px] border-[3px] border-red-500/90 rounded pointer-events-none">
+                                                                        <div className="absolute -top-7 left-[-3px] bg-red-500/90 text-white text-sm font-medium px-2 py-0.5 rounded shadow-sm">
+                                                                            {selectedLog?.type}
+                                                                        </div>
+                                                                    </div>
+                                                                </>
+                                                            )}
                                                         </div>
                                                         <div className="grid grid-cols-2 gap-4 mt-6">
                                                             <div>

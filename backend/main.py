@@ -4,6 +4,28 @@ import time
 
 app = FastAPI(title="PPE Detection API (YOLOv11 Backend)")
 
+# Database and Auth setup
+import models
+from database import engine
+from auth import router as auth_router
+from students import router as students_router
+from logs import router as logs_router
+
+# Create tables if they don't exist (optional, but good for setup)
+models.Base.metadata.create_all(bind=engine)
+
+app.include_router(auth_router)
+app.include_router(students_router)
+app.include_router(logs_router)
+
+# Mount a directory to serve uploaded images statically
+from fastapi.staticfiles import StaticFiles
+import os
+os.makedirs(".uploads/students", exist_ok=True)
+app.mount("/.uploads", StaticFiles(directory=".uploads"), name="uploads")
+# Also mount /uploads to .uploads for backward compatibility with existing DB entries
+app.mount("/uploads", StaticFiles(directory=".uploads"), name="uploads_legacy")
+
 # Allow CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -16,13 +38,6 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"status": "YOLOv11 Backend System Operational"}
-
-@app.get("/api/logs")
-def get_recent_logs():
-    return [
-        {"id": "V-1042", "time": "10:24 AM", "type": "No Helmet"},
-        {"id": "V-1041", "time": "10:15 AM", "type": "No Vest"}
-    ]
 
 from fastapi.responses import StreamingResponse
 import cv2

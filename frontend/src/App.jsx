@@ -10,6 +10,7 @@ import { AuthProvider } from "./contexts/AuthContext"
 import { ProtectedRoute } from "./components/ProtectedRoute"
 
 import Settings from "./components/views/Settings"
+import Students from "./components/views/Students"
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
                 <Route path="live" element={<LiveFeed />} />
                 <Route path="logs" element={<Logs />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="students" element={<Students />} />
               </Route>
             </Route>
           </Routes>
