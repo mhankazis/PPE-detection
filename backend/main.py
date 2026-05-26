@@ -48,11 +48,11 @@ import cv2
 # Verification code (often used for EZVIZ cameras with username 'admin'): OGXCCS
 
 # Option 1: Tapo/General RTSP with account
-#CAMERA_URL = "rtsp://mhankazis%40gmail.com:Skripsi22@192.168.18.56:554/stream1"
+#CAMERA_URL = "rtsp://mhankazis%40gmail.com:Skripsi22@192.168.137.196:554/stream1"
 
 # Option 2: Ezviz/Other cameras using Verification Code
 # Now that the camera is set to H.264, we can use the default stream path
-CAMERA_URL = "rtsp://admin:OGXCCS@192.168.18.56:554/H.264"
+CAMERA_URL = "rtsp://admin:Skripsiku@192.168.137.196:554/H.264"
 
 def create_error_frame(message):
     import numpy as np

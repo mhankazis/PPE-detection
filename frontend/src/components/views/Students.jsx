@@ -84,7 +84,7 @@ export default function Students() {
 
     const handleEdit = (student) => {
         setEditingId(student.id)
-        setFormData({ name: student.name, nis: student.nim, class: '10' }) // Assume class 10 for now if not in DB
+        setFormData({ name: student.name, nis: student.nim, class: student.kelas || '' })
         if (student.photo_path) {
             setPreviewUrl(`http://localhost:8000/${student.photo_path.replace(/\\/g, '/')}`)
         } else {
@@ -130,6 +130,8 @@ export default function Students() {
             submitData.append('kelas', formData.class)
             if (selectedImage) {
                 submitData.append('file', selectedImage)
+            } else if (editingId && !previewUrl) {
+                submitData.append('remove_photo', 'true')
             }
 
             const url = editingId 
@@ -184,11 +186,11 @@ export default function Students() {
                         Daftar Murid
                     </button>
                     <button
-                        onClick={() => setActiveTab('add')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'add' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                        onClick={() => { setActiveTab('add'); resetForm(); }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${(activeTab === 'add' && !editingId) ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                         <Plus className="w-4 h-4" />
-                        {editingId ? 'Edit Murid' : 'Tambah Baru'}
+                        Tambah Baru
                     </button>
                 </div>
             </div>
@@ -202,6 +204,7 @@ export default function Students() {
                                     <th className="px-6 py-4 font-medium">Foto</th>
                                     <th className="px-6 py-4 font-medium">Nama</th>
                                     <th className="px-6 py-4 font-medium">NIS</th>
+                                    <th className="px-6 py-4 font-medium">Kelas</th>
                                     <th className="px-6 py-4 font-medium">Waktu Daftar</th>
                                     <th className="px-6 py-4 font-medium text-right">Actions</th>
                                 </tr>
@@ -209,11 +212,11 @@ export default function Students() {
                             <tbody className="divide-y">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan="5" className="px-6 py-8 text-center text-muted-foreground">Memuat data...</td>
+                                        <td colSpan="6" className="px-6 py-8 text-center text-muted-foreground">Memuat data...</td>
                                     </tr>
                                 ) : students.length === 0 ? (
                                     <tr>
-                                        <td colSpan="5" className="px-6 py-12 text-center">
+                                        <td colSpan="6" className="px-6 py-12 text-center">
                                             <div className="flex flex-col items-center justify-center space-y-3">
                                                 <div className="p-3 bg-muted rounded-full">
                                                     <Users className="w-6 h-6 text-muted-foreground" />
@@ -239,6 +242,7 @@ export default function Students() {
                                             </td>
                                             <td className="px-6 py-4 font-medium">{student.name}</td>
                                             <td className="px-6 py-4">{student.nim}</td>
+                                            <td className="px-6 py-4">{student.kelas ? `Kelas ${student.kelas}` : '-'}</td>
                                             <td className="px-6 py-4 text-muted-foreground">{new Date(student.created_at).toLocaleDateString('id-ID')}</td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">

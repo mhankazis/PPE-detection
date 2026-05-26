@@ -1,30 +1,13 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Camera, Maximize, AlertTriangle, ShieldCheck } from "lucide-react"
+import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2 } from "lucide-react"
 
 export default function LiveFeed() {
-    const [events, setEvents] = useState([
-        { id: 1, text: "Worker detected with full PPE", type: "safe", time: "10:42:01" },
-        { id: 2, text: "Group of 3 detected, compliant", type: "safe", time: "10:41:45" },
-        { id: 3, text: "Missing Helmet - Alert Generated", type: "violation", time: "10:40:12" },
-    ])
+    const [isStreamLoading, setIsStreamLoading] = useState(true)
 
-    // Simulate incoming real-time events
-    useEffect(() => {
-        const interval = setInterval(() => {
-            const isViolation = Math.random() > 0.8
-            const newEvent = {
-                id: Date.now(),
-                text: isViolation ? "Missing Vest - Processing..." : "Worker detected, compliant",
-                type: isViolation ? "violation" : "safe",
-                time: new Date().toLocaleTimeString(),
-            }
-            setEvents((prev) => [newEvent, ...prev].slice(0, 20)) // Keep last 20
-        }, 4500)
-        return () => clearInterval(interval)
-    }, [])
+    // Simulating incoming real-time events is temporarily disabled
 
     return (
         <div className="p-8 h-full flex flex-col animate-in fade-in duration-500">
@@ -48,19 +31,22 @@ export default function LiveFeed() {
                 {/* Video Player */}
                 <Card className="lg:col-span-3 flex flex-col overflow-hidden border-2 border-muted bg-black/5 dark:bg-black/40">
                     <div className="flex-1 relative flex items-center justify-center min-h-[400px] bg-black overflow-hidden">
+                        {/* Loading Overlay */}
+                        {isStreamLoading && (
+                            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-muted-foreground">
+                                <Loader2 className="w-10 h-10 animate-spin mb-4 text-primary" />
+                                <p className="text-sm font-medium animate-pulse">Connecting to Camera...</p>
+                            </div>
+                        )}
+
                         {/* Live Stream from backend */}
                         <img
                             src="http://localhost:8000/api/video_feed"
                             alt="Live CCTV Feed"
-                            className="absolute inset-0 w-full h-full object-contain z-10"
+                            onLoad={() => setIsStreamLoading(false)}
+                            onError={() => setIsStreamLoading(false)}
+                            className={`absolute inset-0 w-full h-full object-contain z-10 transition-opacity duration-500 ${isStreamLoading ? 'opacity-0' : 'opacity-100'}`}
                         />
-
-                        {/* Simulated Bounding Box */}
-                        <div className="absolute top-[30%] left-[40%] w-[120px] h-[240px] border-2 border-red-500/80 bg-red-500/10 rounded pointer-events-none">
-                            <div className="absolute -top-6 left-[-2px] bg-red-500/80 text-white text-xs px-2 py-0.5 whitespace-nowrap rounded-t">
-                                No Helmet 96%
-                            </div>
-                        </div>
 
                         {/* Controls */}
                         <div className="absolute bottom-4 right-4 flex gap-2">
@@ -84,23 +70,10 @@ export default function LiveFeed() {
                     </CardHeader>
                     <ScrollArea className="flex-1">
                         <div className="p-4 space-y-4">
-                            {events.map((event) => (
-                                <div key={event.id} className="flex justify-between items-start text-sm border-b pb-3 last:border-0 last:pb-0">
-                                    <div className="flex gap-3">
-                                        {event.type === 'violation' ? (
-                                            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                                        ) : (
-                                            <ShieldCheck className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
-                                        )}
-                                        <span className={event.type === 'violation' ? 'font-medium text-red-500 dark:text-red-400' : 'text-muted-foreground'}>
-                                            {event.text}
-                                        </span>
-                                    </div>
-                                    <span className="text-xs text-muted-foreground whitespace-nowrap ml-4">
-                                        {event.time}
-                                    </span>
-                                </div>
-                            ))}
+                            <div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground">
+                                <AlertTriangle className="w-8 h-8 mb-3 opacity-50" />
+                                <p className="text-sm">Event logging is temporarily disabled.</p>
+                            </div>
                         </div>
                     </ScrollArea>
                 </Card>

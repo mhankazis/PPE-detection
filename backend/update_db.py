@@ -10,5 +10,9 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE logs ADD COLUMN status VARCHAR(20) DEFAULT 'Belum Dihukum'"))
     except Exception as e:
         print(f"Error adding status: {e}")
+    try:
+        conn.execute(text("ALTER TABLE students ADD COLUMN kelas VARCHAR(50) DEFAULT NULL"))
+    except Exception as e:
+        print(f"Error adding kelas: {e}")
     conn.commit()
 print("DB updated")

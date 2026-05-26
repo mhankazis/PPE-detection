@@ -19,6 +19,7 @@ class Student(Base):
     id = Column(Integer, primary_key=True, index=True)
     nim = Column(String(50), unique=True, index=True, nullable=False)
     name = Column(String(100), nullable=False)
+    kelas = Column(String(50), nullable=True)
     photo_path = Column(String(255), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
