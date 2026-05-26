@@ -65,73 +65,86 @@ def create_error_frame(message):
     ret, buffer = cv2.imencode('.jpg', frame)
     return buffer.tobytes()
 
-def generate_frames():
-    import os
-    import time
-    
-    # Now that the stream is H.264, we only need TCP transport. 
-    # Remove the aggressive drop flags that were causing stuttering on keyframes.
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-    
-    camera = None
-    
-    def connect_camera():
-        nonlocal camera
-        if camera is not None:
-            camera.release()
-        print(f"Connecting to camera at {CAMERA_URL}...")
-        camera = cv2.VideoCapture(CAMERA_URL, cv2.CAP_FFMPEG)
-        # Reduce buffer size to prevent lagging
-        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        return camera.isOpened()
+import threading
 
-    try:
-        print("Initializing camera connection...")
-        if not connect_camera():
-            print("Make sure LAN Live View / RTSP is enabled in your Ezviz app settings.")
-            error_frame = create_error_frame("Cannot connect to RTSP stream.")
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
-            # We don't return here anymore, we'll try to reconnect in the loop
-        else:
-            print("Camera connected successfully. Streaming frames...")
+class CameraStream:
+    def __init__(self):
+        self.camera = None
+        self.frame = None
+        self.running = False
+        self.lock = threading.Lock()
+        self.thread = None
+
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._update, daemon=True)
+        self.thread.start()
+
+    def _update(self):
+        import os
+        import time
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        print(f"Connecting to camera at {CAMERA_URL}...")
+        self.camera = cv2.VideoCapture(CAMERA_URL, cv2.CAP_FFMPEG)
+        self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         consecutive_failures = 0
-        while True:
-            if camera is None or not camera.isOpened():
+        while self.running:
+            if not self.camera.isOpened():
                 success = False
             else:
-                success, frame = camera.read()
-                
-            if not success:
+                success, frame = self.camera.read()
+
+            if success:
+                consecutive_failures = 0
+                if hasattr(frame, 'size') and getattr(frame, 'size', 0) > 0:
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    if ret:
+                        with self.lock:
+                            self.frame = buffer.tobytes()
+            else:
                 consecutive_failures += 1
-                print(f"Error reading frame from camera (failure {consecutive_failures}).")
+                print(f"Camera read error. Failures: {consecutive_failures}")
                 
-                # Show reconnecting frame to user
-                error_frame = create_error_frame("Connection lost. Reconnecting...")
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
+                # Show error frame
+                error_bytes = create_error_frame("Connection lost. Reconnecting...")
+                with self.lock:
+                    self.frame = error_bytes
                 
-                # Attempt reconnection if we fail too many times or immediately
-                # Wait 3 seconds to prevent camera from locking up due to rapid reconnects
-                time.sleep(3) 
-                connect_camera()
-                continue
-                
-            # Reset failures if successful
-            consecutive_failures = 0
-            
-            # Di sini nantinya kita bisa memasukkan logika deteksi YOLOv11
-            # Check if frame is valid (HEVC dropouts can occasionally produce empty frames even on success=True)
-            if hasattr(frame, 'size') and getattr(frame, 'size', 0) > 0:
-                ret, buffer = cv2.imencode('.jpg', frame)
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    finally:
-        print("Client disconnected or generator closed. Releasing camera...")
-        if camera is not None:
-            camera.release()
+                time.sleep(3)
+                if consecutive_failures > 2:
+                    print("Reconnecting to camera...")
+                    if self.camera:
+                        self.camera.release()
+                    self.camera = cv2.VideoCapture(CAMERA_URL, cv2.CAP_FFMPEG)
+                    self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    consecutive_failures = 0
+
+    def get_frame(self):
+        with self.lock:
+            return self.frame
+
+camera_stream = CameraStream()
+
+def generate_frames():
+    import time
+    camera_stream.start()
+    
+    # Send loading frame initially if no frame is ready
+    if camera_stream.get_frame() is None:
+        loading_frame = create_error_frame("Connecting to camera stream...")
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + loading_frame + b'\r\n')
+               
+    while True:
+        frame_bytes = camera_stream.get_frame()
+        if frame_bytes is not None:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        # Limit frame rate roughly to 30fps to avoid CPU overload on empty loop
+        time.sleep(0.033)
 
 @app.get("/api/video_feed")
 def video_feed():

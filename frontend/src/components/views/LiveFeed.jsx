@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -6,6 +6,17 @@ import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2 } from "lucide-re
 
 export default function LiveFeed() {
     const [isStreamLoading, setIsStreamLoading] = useState(true)
+    const imgRef = useRef(null)
+
+    // Cleanup the stream when navigating away to prevent hanging requests
+    useEffect(() => {
+        return () => {
+            if (imgRef.current) {
+                // Setting src to empty string forces the browser to abort the active stream request
+                imgRef.current.src = "";
+            }
+        }
+    }, [])
 
     // Simulating incoming real-time events is temporarily disabled
 
@@ -41,6 +52,7 @@ export default function LiveFeed() {
 
                         {/* Live Stream from backend */}
                         <img
+                            ref={imgRef}
                             src="http://localhost:8000/api/video_feed"
                             alt="Live CCTV Feed"
                             onLoad={() => setIsStreamLoading(false)}
