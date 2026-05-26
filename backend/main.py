@@ -85,48 +85,53 @@ def generate_frames():
         camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return camera.isOpened()
 
-    print("Initializing camera connection...")
-    if not connect_camera():
-        print("Make sure LAN Live View / RTSP is enabled in your Ezviz app settings.")
-        error_frame = create_error_frame("Cannot connect to RTSP stream.")
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
-        # We don't return here anymore, we'll try to reconnect in the loop
-    else:
-        print("Camera connected successfully. Streaming frames...")
-
-    consecutive_failures = 0
-    while True:
-        if camera is None or not camera.isOpened():
-            success = False
-        else:
-            success, frame = camera.read()
-            
-        if not success:
-            consecutive_failures += 1
-            print(f"Error reading frame from camera (failure {consecutive_failures}).")
-            
-            # Show reconnecting frame to user
-            error_frame = create_error_frame("Connection lost. Reconnecting...")
+    try:
+        print("Initializing camera connection...")
+        if not connect_camera():
+            print("Make sure LAN Live View / RTSP is enabled in your Ezviz app settings.")
+            error_frame = create_error_frame("Cannot connect to RTSP stream.")
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
-            
-            # Attempt reconnection if we fail too many times or immediately
-            # Wait 3 seconds to prevent camera from locking up due to rapid reconnects
-            time.sleep(3) 
-            connect_camera()
-            continue
-            
-        # Reset failures if successful
+            # We don't return here anymore, we'll try to reconnect in the loop
+        else:
+            print("Camera connected successfully. Streaming frames...")
+
         consecutive_failures = 0
-        
-        # Di sini nantinya kita bisa memasukkan logika deteksi YOLOv11
-        # Check if frame is valid (HEVC dropouts can occasionally produce empty frames even on success=True)
-        if hasattr(frame, 'size') and getattr(frame, 'size', 0) > 0:
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        while True:
+            if camera is None or not camera.isOpened():
+                success = False
+            else:
+                success, frame = camera.read()
+                
+            if not success:
+                consecutive_failures += 1
+                print(f"Error reading frame from camera (failure {consecutive_failures}).")
+                
+                # Show reconnecting frame to user
+                error_frame = create_error_frame("Connection lost. Reconnecting...")
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
+                
+                # Attempt reconnection if we fail too many times or immediately
+                # Wait 3 seconds to prevent camera from locking up due to rapid reconnects
+                time.sleep(3) 
+                connect_camera()
+                continue
+                
+            # Reset failures if successful
+            consecutive_failures = 0
+            
+            # Di sini nantinya kita bisa memasukkan logika deteksi YOLOv11
+            # Check if frame is valid (HEVC dropouts can occasionally produce empty frames even on success=True)
+            if hasattr(frame, 'size') and getattr(frame, 'size', 0) > 0:
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+    finally:
+        print("Client disconnected or generator closed. Releasing camera...")
+        if camera is not None:
+            camera.release()
 
 @app.get("/api/video_feed")
 def video_feed():
