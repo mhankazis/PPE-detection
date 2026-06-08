@@ -10,6 +10,7 @@ from database import engine
 from auth import router as auth_router
 from students import router as students_router
 from logs import router as logs_router
+from detect_router import router as detect_router
 
 # Create tables if they don't exist (optional, but good for setup)
 models.Base.metadata.create_all(bind=engine)
@@ -17,11 +18,13 @@ models.Base.metadata.create_all(bind=engine)
 app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(logs_router)
+app.include_router(detect_router)
 
 # Mount a directory to serve uploaded images statically
 from fastapi.staticfiles import StaticFiles
 import os
 os.makedirs(".uploads/students", exist_ok=True)
+os.makedirs(".uploads/detections", exist_ok=True)
 app.mount("/.uploads", StaticFiles(directory=".uploads"), name="uploads")
 # Also mount /uploads to .uploads for backward compatibility with existing DB entries
 app.mount("/uploads", StaticFiles(directory=".uploads"), name="uploads_legacy")

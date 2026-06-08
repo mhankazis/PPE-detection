@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
-import { LayoutDashboard, Video, FileText, Settings, ShieldAlert, LogOut, ImagePlus, Users } from "lucide-react"
+import { LayoutDashboard, Video, FileText, Settings, ShieldAlert, LogOut, ImagePlus, Users, FileVideo } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ModeToggle } from "../mode-toggle"
 import { useAuth } from "../../contexts/AuthContext"
@@ -9,6 +9,7 @@ const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Data Murid', href: '/students', icon: Users },
     { name: 'Upload Image', href: '/upload', icon: ImagePlus },
+    { name: 'Upload Video', href: '/video', icon: FileVideo },
     { name: 'Live Feed', href: '/live', icon: Video },
     { name: 'Violation Logs', href: '/logs', icon: FileText },
     { name: 'Settings', href: '/settings', icon: Settings },
