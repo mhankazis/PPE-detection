@@ -23,7 +23,7 @@ const CLASS_DRAW_COLORS = {
     Glasses: '#eab308',
 }
 
-export default function ImageUpload() {
+export default function ImageUploadContent() {
     const [selectedImage, setSelectedImage] = useState(null)
     const [previewUrl, setPreviewUrl] = useState(null)
     const [isDragging, setIsDragging] = useState(false)
@@ -237,13 +237,7 @@ export default function ImageUpload() {
     }
 
     return (
-        <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex flex-col gap-2">
-                <h1 className="text-3xl font-bold tracking-tight">Image Object Detection</h1>
-                <p className="text-muted-foreground">Upload gambar untuk mendeteksi kelengkapan APD menggunakan YOLOv11.</p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Upload & Preview Area */}
                 <div className="lg:col-span-2 space-y-4">
                     {!previewUrl ? (
@@ -549,7 +543,6 @@ export default function ImageUpload() {
                         )}
                     </div>
                 </div>
-            </div>
         </div>
     )
 }

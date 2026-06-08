@@ -67,6 +67,9 @@ class PPEDetector:
         """Update confidence threshold."""
         self.confidence = max(0.1, min(1.0, conf))
 
+    # NMS IoU threshold — lower = more aggressive duplicate suppression
+    NMS_IOU_THRESHOLD = 0.45
+
     def detect_frame(self, frame: np.ndarray) -> tuple:
         """
         Run detection on a single frame (numpy array BGR).
@@ -76,12 +79,10 @@ class PPEDetector:
             detections (list[dict]): List of detection results
             compliance (list[dict]): PPE compliance per person
         """
-        results = self.model(frame, conf=self.confidence, verbose=False)
+        results = self.model(frame, conf=self.confidence, iou=self.NMS_IOU_THRESHOLD, verbose=False)
         result = results[0]
 
-        detections = []
-        persons = []
-        ppe_items = []
+        raw_detections = []
 
         for box in result.boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
@@ -89,17 +90,23 @@ class PPEDetector:
             cls_id = int(box.cls[0])
             label = self.model.names[cls_id].title()
 
-            detection = {
+            raw_detections.append({
                 "label": label,
                 "confidence": round(conf, 3),
                 "bbox": [int(x1), int(y1), int(x2), int(y2)],
-            }
-            detections.append(detection)
+            })
 
-            if label == "Person":
-                persons.append(detection)
+        # Custom deduplication — remove same-class overlapping boxes
+        detections = self._deduplicate(raw_detections)
+
+        persons = []
+        ppe_items = []
+
+        for det in detections:
+            if det["label"] == "Person":
+                persons.append(det)
             else:
-                ppe_items.append(detection)
+                ppe_items.append(det)
 
         # Calculate PPE compliance per person
         compliance = self._check_compliance(persons, ppe_items)
@@ -108,6 +115,65 @@ class PPEDetector:
         annotated_frame = self._draw_annotations(frame.copy(), detections, compliance)
 
         return annotated_frame, detections, compliance
+
+    def _deduplicate(self, detections: list, iou_threshold: float = 0.5) -> list:
+        """
+        Remove duplicate detections of the same class with high overlap.
+        Keeps the detection with the highest confidence.
+        """
+        if not detections:
+            return detections
+
+        # Group by class
+        by_class = {}
+        for det in detections:
+            label = det["label"]
+            if label not in by_class:
+                by_class[label] = []
+            by_class[label].append(det)
+
+        result = []
+        for label, class_dets in by_class.items():
+            # Sort by confidence descending
+            class_dets.sort(key=lambda d: d["confidence"], reverse=True)
+
+            keep = []
+            for det in class_dets:
+                is_duplicate = False
+                for kept in keep:
+                    iou = self._compute_iou(det["bbox"], kept["bbox"])
+                    if iou > iou_threshold:
+                        is_duplicate = True
+                        break
+                if not is_duplicate:
+                    keep.append(det)
+
+            result.extend(keep)
+
+        return result
+
+    def _compute_iou(self, box_a, box_b) -> float:
+        """Compute standard IoU (Intersection over Union) between two boxes."""
+        ax1, ay1, ax2, ay2 = box_a
+        bx1, by1, bx2, by2 = box_b
+
+        ix1 = max(ax1, bx1)
+        iy1 = max(ay1, by1)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+
+        if ix1 >= ix2 or iy1 >= iy2:
+            return 0.0
+
+        inter_area = (ix2 - ix1) * (iy2 - iy1)
+        area_a = (ax2 - ax1) * (ay2 - ay1)
+        area_b = (bx2 - bx1) * (by2 - by1)
+        union_area = area_a + area_b - inter_area
+
+        if union_area == 0:
+            return 0.0
+
+        return inter_area / union_area
 
     def detect_image_bytes(self, image_bytes: bytes) -> tuple:
         """

@@ -70,17 +70,12 @@ async def detect_image(file: UploadFile = File(...)):
 @router.post("/video")
 async def detect_video(file: UploadFile = File(...)):
     """
-    Upload a video, run frame-by-frame PPE detection, and return annotated video.
-    Returns JSON with URL to annotated video and summary statistics.
+    Upload a video, run smart frame-by-frame PPE detection with motion detection.
+    Only re-detects when significant movement is detected.
+    Returns JSON with per-frame detection data and URL to browser-playable video.
     """
     from detection import get_detector
-    import subprocess
-
-    # Validate file type
-    allowed_types = ["video/mp4", "video/avi", "video/x-msvideo", "video/quicktime", "video/x-matroska"]
-    if file.content_type and file.content_type not in allowed_types:
-        # Be lenient — some browsers send wrong MIME types
-        pass
+    import numpy as np
 
     # Save uploaded video to temp file
     temp_input = UPLOAD_DIR / f"tmp_in_{uuid.uuid4().hex[:8]}{Path(file.filename).suffix}"
@@ -90,15 +85,15 @@ async def detect_video(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {str(e)}")
 
-    # Output files
-    output_filename = f"det_{uuid.uuid4().hex[:8]}.mp4"
-    output_path = UPLOAD_DIR / output_filename
-    temp_output = UPLOAD_DIR / f"tmp_out_{uuid.uuid4().hex[:8]}.mp4"
+    # Re-encode original video to H.264 for browser playback
+    video_filename = f"vid_{uuid.uuid4().hex[:8]}.mp4"
+    video_path = UPLOAD_DIR / video_filename
+    _reencode_to_h264(str(temp_input), str(video_path))
 
     try:
         detector = get_detector()
 
-        # Open input video
+        # Open video for frame processing
         cap = cv2.VideoCapture(str(temp_input))
         if not cap.isOpened():
             raise HTTPException(status_code=400, detail="Could not open video file")
@@ -108,15 +103,18 @@ async def detect_video(file: UploadFile = File(...)):
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # Write with mp4v first (reliable with OpenCV)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(temp_output), fourcc, fps, (width, height))
-
         frame_count = 0
+        frames_detected = 0
+        frames_skipped = 0
+        frame_detections = []
         all_compliance = []
-        last_annotated_frame = None
-        # Process every Nth frame for speed
-        process_interval = max(1, int(fps / 10))  # ~10 detections per second
+
+        prev_detection_frame = None  # frame used for last detection (for motion comparison)
+        last_detections = []
+        last_compliance = []
+
+        # Periodic forced detection interval (in frames) — every 2 seconds
+        forced_interval = max(1, int(fps * 2))
 
         while True:
             ret, frame = cap.read()
@@ -124,28 +122,39 @@ async def detect_video(file: UploadFile = File(...)):
                 break
 
             frame_count += 1
+            timestamp = round(frame_count / fps, 3)
 
-            if frame_count % process_interval == 0 or frame_count == 1:
-                annotated_frame, detections, compliance = detector.detect_frame(frame)
+            # Decide whether to run detection on this frame
+            should_detect = (
+                frame_count == 1 or                              # Always detect first frame
+                frame_count % forced_interval == 0 or            # Periodic forced check
+                _has_significant_motion(prev_detection_frame, frame)  # Motion detected
+            )
+
+            if should_detect:
+                _, detections, compliance = detector.detect_frame(frame)
+                last_detections = detections
+                last_compliance = compliance
+                prev_detection_frame = frame.copy()
                 all_compliance.extend(compliance)
-                last_annotated_frame = annotated_frame
-                out.write(annotated_frame)
+                frames_detected += 1
+
+                frame_detections.append({
+                    "frame": frame_count,
+                    "timestamp": timestamp,
+                    "detections": detections,
+                    "compliance": compliance,
+                })
             else:
-                # For non-key frames, write original frame
-                out.write(frame)
+                frames_skipped += 1
 
         cap.release()
-        out.release()
-
-        # Re-encode to H.264 for browser compatibility
-        _reencode_to_h264(str(temp_output), str(output_path))
 
         # Build summary
         total_persons = len(all_compliance)
         compliant = sum(1 for c in all_compliance if c["is_compliant"])
         non_compliant = total_persons - compliant
 
-        # Collect unique violation types
         all_missing = set()
         for c in all_compliance:
             for m in c.get("missing_ppe", []):
@@ -153,10 +162,13 @@ async def detect_video(file: UploadFile = File(...)):
 
         return {
             "success": True,
-            "annotated_video_url": f"/.uploads/detections/{output_filename}",
+            "video_url": f"/.uploads/detections/{video_filename}",
+            "video_dimensions": {"width": width, "height": height},
+            "frame_detections": frame_detections,
             "summary": {
                 "total_frames": frame_count,
-                "frames_analyzed": frame_count // process_interval + 1,
+                "frames_detected": frames_detected,
+                "frames_skipped": frames_skipped,
                 "total_person_detections": total_persons,
                 "compliant_detections": compliant,
                 "non_compliant_detections": non_compliant,
@@ -171,13 +183,43 @@ async def detect_video(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video processing failed: {str(e)}")
     finally:
-        # Clean up temp files
-        for tmp in [temp_input, temp_output]:
-            if tmp.exists():
-                try:
-                    os.remove(tmp)
-                except:
-                    pass
+        # Clean up temp input file
+        if temp_input.exists():
+            try:
+                os.remove(temp_input)
+            except:
+                pass
+
+
+def _has_significant_motion(prev_frame, curr_frame, threshold=25, min_area_pct=0.02):
+    """
+    Check if there's significant motion between two frames.
+    Uses frame differencing with Gaussian blur to reduce noise.
+    Returns True if more than min_area_pct of pixels changed significantly.
+    """
+    import numpy as np
+
+    if prev_frame is None:
+        return True
+
+    # Convert to grayscale
+    gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+
+    # Blur to reduce noise
+    gray1 = cv2.GaussianBlur(gray1, (21, 21), 0)
+    gray2 = cv2.GaussianBlur(gray2, (21, 21), 0)
+
+    # Absolute difference
+    diff = cv2.absdiff(gray1, gray2)
+
+    # Threshold
+    _, thresh = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+
+    # Calculate percentage of changed pixels
+    changed_pct = np.count_nonzero(thresh) / thresh.size
+
+    return changed_pct > min_area_pct
 
 
 def _reencode_to_h264(input_path: str, output_path: str):
