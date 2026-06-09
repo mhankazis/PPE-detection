@@ -74,9 +74,11 @@ class CameraStream:
     def __init__(self):
         self.camera = None
         self.frame = None
+        self.raw_frame = None  # Raw BGR numpy array for detection
         self.running = False
         self.lock = threading.Lock()
         self.thread = None
+        self._frame_id = 0  # Monotonic counter to detect new frames
 
     def start(self):
         if self.running:
@@ -98,15 +100,21 @@ class CameraStream:
             if not self.camera.isOpened():
                 success = False
             else:
-                success, frame = self.camera.read()
+                # Grab multiple frames to flush buffer — always get the LATEST frame
+                # This prevents latency buildup from buffered RTSP frames
+                for _ in range(3):
+                    self.camera.grab()
+                success, frame = self.camera.retrieve()
 
             if success:
                 consecutive_failures = 0
                 if hasattr(frame, 'size') and getattr(frame, 'size', 0) > 0:
-                    ret, buffer = cv2.imencode('.jpg', frame)
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     if ret:
                         with self.lock:
                             self.frame = buffer.tobytes()
+                            self.raw_frame = frame  # Keep raw BGR for detection
+                            self._frame_id += 1
             else:
                 consecutive_failures += 1
                 print(f"Camera read error. Failures: {consecutive_failures}")
@@ -115,6 +123,7 @@ class CameraStream:
                 error_bytes = create_error_frame("Connection lost. Reconnecting...")
                 with self.lock:
                     self.frame = error_bytes
+                    self.raw_frame = None
                 
                 time.sleep(3)
                 if consecutive_failures > 2:
@@ -126,8 +135,14 @@ class CameraStream:
                     consecutive_failures = 0
 
     def get_frame(self):
+        """Get latest JPEG frame bytes."""
         with self.lock:
             return self.frame
+
+    def get_raw_frame(self):
+        """Get latest raw BGR numpy array (for detection, avoids re-decoding JPEG)."""
+        with self.lock:
+            return self.raw_frame, self._frame_id
 
 camera_stream = CameraStream()
 
@@ -140,13 +155,13 @@ def generate_frames():
         loading_frame = create_error_frame("Connecting to camera stream...")
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + loading_frame + b'\r\n')
-               
+                
     while True:
         frame_bytes = camera_stream.get_frame()
         if frame_bytes is not None:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        # Limit frame rate roughly to 30fps to avoid CPU overload on empty loop
+        # Limit frame rate to ~30fps to avoid CPU overload
         time.sleep(0.033)
 
 @app.get("/api/video_feed")

@@ -67,15 +67,22 @@ async def detect_image(file: UploadFile = File(...)):
     }
 
 
+# Video detection configuration
+VIDEO_INFER_MAX_DIM = 640         # Max dimension for inference downscaling
+VIDEO_SAMPLE_INTERVAL = 1.0       # Minimum seconds between detections (adaptive)
+
+
 @router.post("/video")
 async def detect_video(file: UploadFile = File(...)):
     """
     Upload a video, run smart frame-by-frame PPE detection with motion detection.
-    Only re-detects when significant movement is detected.
+    Only re-detects when significant movement is detected or periodically.
+    Uses downscaling for faster inference. Runs detection in a thread to avoid blocking.
     Returns JSON with per-frame detection data and URL to browser-playable video.
     """
     from detection import get_detector
     import numpy as np
+    import asyncio
 
     # Save uploaded video to temp file
     temp_input = UPLOAD_DIR / f"tmp_in_{uuid.uuid4().hex[:8]}{Path(file.filename).suffix}"
@@ -90,10 +97,10 @@ async def detect_video(file: UploadFile = File(...)):
     video_path = UPLOAD_DIR / video_filename
     _reencode_to_h264(str(temp_input), str(video_path))
 
-    try:
+    def _process_video():
+        """Synchronous video processing — runs in thread pool."""
         detector = get_detector()
 
-        # Open video for frame processing
         cap = cv2.VideoCapture(str(temp_input))
         if not cap.isOpened():
             raise HTTPException(status_code=400, detail="Could not open video file")
@@ -103,18 +110,27 @@ async def detect_video(file: UploadFile = File(...)):
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        # Calculate downscale factor
+        max_dim = max(width, height)
+        infer_scale = min(VIDEO_INFER_MAX_DIM / max_dim, 1.0)
+        infer_w = int(width * infer_scale)
+        infer_h = int(height * infer_scale)
+
         frame_count = 0
         frames_detected = 0
         frames_skipped = 0
         frame_detections = []
         all_compliance = []
 
-        prev_detection_frame = None  # frame used for last detection (for motion comparison)
+        prev_detection_frame = None
         last_detections = []
         last_compliance = []
 
-        # Periodic forced detection interval (in frames) — every 2 seconds
-        forced_interval = max(1, int(fps * 2))
+        # Periodic forced detection interval (in frames) — every VIDEO_SAMPLE_INTERVAL seconds
+        forced_interval = max(1, int(fps * VIDEO_SAMPLE_INTERVAL))
+
+        # Motion detection uses small grayscale — no need for full resolution
+        motion_scale = 0.25  # Downscale to 25% for motion detection
 
         while True:
             ret, frame = cap.read()
@@ -128,11 +144,25 @@ async def detect_video(file: UploadFile = File(...)):
             should_detect = (
                 frame_count == 1 or                              # Always detect first frame
                 frame_count % forced_interval == 0 or            # Periodic forced check
-                _has_significant_motion(prev_detection_frame, frame)  # Motion detected
+                _has_significant_motion_fast(prev_detection_frame, frame, motion_scale)
             )
 
             if should_detect:
-                _, detections, compliance = detector.detect_frame(frame)
+                # Downscale for inference
+                if infer_scale < 1.0:
+                    small_frame = cv2.resize(frame, (infer_w, infer_h), interpolation=cv2.INTER_LINEAR)
+                else:
+                    small_frame = frame
+
+                _, detections, compliance = detector.detect_frame(small_frame, annotate=False)
+
+                # Scale bounding boxes back to original resolution
+                if infer_scale < 1.0:
+                    for det in detections:
+                        det["bbox"] = [int(v / infer_scale) for v in det["bbox"]]
+                    for comp in compliance:
+                        comp["person_bbox"] = [int(v / infer_scale) for v in comp["person_bbox"]]
+
                 last_detections = detections
                 last_compliance = compliance
                 prev_detection_frame = frame.copy()
@@ -178,6 +208,10 @@ async def detect_video(file: UploadFile = File(...)):
             }
         }
 
+    try:
+        # Run video processing in thread pool to avoid blocking the event loop
+        result = await asyncio.to_thread(_process_video)
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -209,6 +243,42 @@ def _has_significant_motion(prev_frame, curr_frame, threshold=25, min_area_pct=0
     # Blur to reduce noise
     gray1 = cv2.GaussianBlur(gray1, (21, 21), 0)
     gray2 = cv2.GaussianBlur(gray2, (21, 21), 0)
+
+    # Absolute difference
+    diff = cv2.absdiff(gray1, gray2)
+
+    # Threshold
+    _, thresh = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+
+    # Calculate percentage of changed pixels
+    changed_pct = np.count_nonzero(thresh) / thresh.size
+
+    return changed_pct > min_area_pct
+
+
+def _has_significant_motion_fast(prev_frame, curr_frame, scale=0.25, threshold=25, min_area_pct=0.02):
+    """
+    Optimized motion detection — downscales frames before comparison.
+    Much faster than full-resolution motion detection.
+    """
+    import numpy as np
+
+    if prev_frame is None:
+        return True
+
+    # Downscale both frames for fast comparison
+    h, w = curr_frame.shape[:2]
+    small_w, small_h = int(w * scale), int(h * scale)
+
+    gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+
+    gray1 = cv2.resize(gray1, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+    gray2 = cv2.resize(gray2, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
+
+    # Blur to reduce noise (smaller kernel for small images)
+    gray1 = cv2.GaussianBlur(gray1, (11, 11), 0)
+    gray2 = cv2.GaussianBlur(gray2, (11, 11), 0)
 
     # Absolute difference
     diff = cv2.absdiff(gray1, gray2)
@@ -260,6 +330,7 @@ def _reencode_to_h264(input_path: str, output_path: str):
 def detect_live_feed():
     """
     Stream MJPEG with YOLO PPE detection overlay on the CCTV feed.
+    Uses frame skipping + downscaling for low-latency detection.
     """
     return StreamingResponse(
         _generate_detection_frames(),
@@ -267,35 +338,94 @@ def detect_live_feed():
     )
 
 
+# Live detection configuration
+LIVE_INFER_MAX_DIM = 416         # Downscale frame to this max dimension for inference (416 = fast)
+LIVE_JPEG_QUALITY = 70           # Lower quality for faster encoding
+LIVE_TARGET_FPS = 20             # Target output FPS
+LIVE_MIN_DETECT_INTERVAL = 0.1   # Minimum seconds between YOLO inferences (adaptive)
+
+
 def _generate_detection_frames():
-    """Generator that yields MJPEG frames with YOLO detection overlay."""
+    """
+    Generator that yields MJPEG frames with YOLO detection overlay.
+    
+    Optimizations:
+    - Uses raw BGR frame directly from CameraStream (no JPEG re-decode)
+    - Adaptive frame skipping: skips detection if previous inference is still running
+    - Downscaling for faster YOLO inference
+    - Lower JPEG quality for faster encoding
+    - No sleep when frames are immediately available
+    """
     from detection import get_detector
     import main as main_module
+    import numpy as np
+    import time
 
     detector = get_detector()
 
     # Ensure camera stream is started
     main_module.camera_stream.start()
 
-    import numpy as np
+    last_annotated_frame = None
+    last_frame_id = -1
+    last_detect_time = 0
+    frame_interval = 1.0 / LIVE_TARGET_FPS
 
     while True:
-        frame_bytes = main_module.camera_stream.get_frame()
-        if frame_bytes is not None:
-            # Decode the JPEG frame from camera stream
-            nparr = np.frombuffer(frame_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        loop_start = time.time()
 
-            if frame is not None:
+        # Get raw BGR frame directly — avoids JPEG decode overhead
+        raw_frame, frame_id = main_module.camera_stream.get_raw_frame()
+
+        if raw_frame is not None:
+            now = time.time()
+            time_since_detect = now - last_detect_time
+
+            # Run detection if enough time has passed AND we have a new frame
+            should_detect = (
+                last_annotated_frame is None or
+                (time_since_detect >= LIVE_MIN_DETECT_INTERVAL and frame_id != last_frame_id)
+            )
+
+            if should_detect:
+                last_frame_id = frame_id
+                last_detect_time = now
                 try:
-                    annotated_frame, _, _ = detector.detect_frame(frame)
-                    _, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    frame_bytes = buffer.tobytes()
+                    # Downscale for faster inference
+                    h, w = raw_frame.shape[:2]
+                    scale = min(LIVE_INFER_MAX_DIM / max(h, w), 1.0)
+                    if scale < 1.0:
+                        small_frame = cv2.resize(raw_frame, (int(w * scale), int(h * scale)),
+                                                 interpolation=cv2.INTER_LINEAR)
+                    else:
+                        small_frame = raw_frame
+
+                    # Run detection on downscaled frame (no annotation — we draw on full res)
+                    _, detections, compliance = detector.detect_frame(small_frame, annotate=False)
+
+                    # Scale detections back to original resolution and draw on full frame
+                    if scale < 1.0:
+                        for det in detections:
+                            det["bbox"] = [int(v / scale) for v in det["bbox"]]
+                        for comp in compliance:
+                            comp["person_bbox"] = [int(v / scale) for v in comp["person_bbox"]]
+
+                    annotated_frame = detector._draw_annotations(raw_frame.copy(), detections, compliance, lightweight=True)
+                    last_annotated_frame = annotated_frame
                 except Exception:
-                    pass  # If detection fails, send original frame
+                    last_annotated_frame = raw_frame
+
+            # Encode the (possibly cached) annotated frame
+            out_frame = last_annotated_frame if last_annotated_frame is not None else raw_frame
+            _, buffer = cv2.imencode('.jpg', out_frame,
+                                     [cv2.IMWRITE_JPEG_QUALITY, LIVE_JPEG_QUALITY])
+            frame_bytes = buffer.tobytes()
 
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        # Limit to ~15fps for detection (YOLO inference takes time)
-        time.sleep(0.066)
+        # Adaptive sleep — maintain target FPS without wasting cycles
+        elapsed = time.time() - loop_start
+        sleep_time = frame_interval - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
