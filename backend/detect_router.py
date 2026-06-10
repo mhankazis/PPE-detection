@@ -339,10 +339,10 @@ def detect_live_feed():
 
 
 # Live detection configuration
-LIVE_INFER_MAX_DIM = 416         # Downscale frame to this max dimension for inference (416 = fast)
+LIVE_INFER_MAX_DIM = 640         # Downscale frame to this max dimension for inference (640 = YOLO native, good accuracy)
 LIVE_JPEG_QUALITY = 70           # Lower quality for faster encoding
-LIVE_TARGET_FPS = 20             # Target output FPS
-LIVE_MIN_DETECT_INTERVAL = 0.1   # Minimum seconds between YOLO inferences (adaptive)
+LIVE_TARGET_FPS = 15             # Target output FPS (slightly lower to allow more inference time)
+LIVE_MIN_DETECT_INTERVAL = 0.15  # Minimum seconds between YOLO inferences (adaptive)
 
 
 def _generate_detection_frames():
@@ -363,6 +363,33 @@ def _generate_detection_frames():
 
     detector = get_detector()
 
+    # Lazy-load face recognizer (only when students are enrolled)
+    face_recognizer = None
+    student_names = {}  # {student_id: name} lookup for display
+    try:
+        from face_recognition import get_recognizer
+        face_recognizer = get_recognizer()
+        if face_recognizer.get_cache_size() == 0:
+            face_recognizer = None  # No students enrolled, skip face recognition
+    except Exception as e:
+        print(f"[LiveDetect] Face recognizer init failed: {e}")
+        face_recognizer = None
+
+    # Load student name lookup from DB
+    if face_recognizer is not None:
+        try:
+            from database import SessionLocal
+            import models
+            db = SessionLocal()
+            try:
+                students = db.query(models.Student).all()
+                student_names = {s.id: s.name for s in students}
+                print(f"[LiveDetect] Loaded {len(student_names)} student names for face recognition display")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[LiveDetect] Failed to load student names: {e}")
+
     # Ensure camera stream is started
     main_module.camera_stream.start()
 
@@ -370,6 +397,78 @@ def _generate_detection_frames():
     last_frame_id = -1
     last_detect_time = 0
     frame_interval = 1.0 / LIVE_TARGET_FPS
+
+    # --- Auto-violation logging with debounce ---
+    # Tracks last log time per (student_id, violation_type) or (bbox_hash, violation_type)
+    # to prevent spamming the database with duplicate violations.
+    VIOLATION_COOLDOWN = 60.0  # seconds — minimum time between same violation for same person
+    _violation_log_times = {}  # key: (identifier, violation_key) -> last_log_timestamp
+    VIOLATION_LOG_DIR = Path(".uploads/logs")
+    VIOLATION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _log_violation(comp, annotated_img):
+        """Create a violation log entry in the database with debounce protection."""
+        import random
+        student_id = comp.get("identified_student_id")
+        missing = comp.get("missing_ppe", [])
+        violation_key = ",".join(sorted(missing))
+
+        # Build identifier: use student_id if identified, else bbox hash for anonymous tracking
+        if student_id is not None:
+            identifier = f"student:{student_id}"
+        else:
+            # Hash the bbox to track anonymous persons by location
+            bbox = comp.get("person_bbox", [])
+            identifier = f"anon:{hash(tuple(bbox))}"
+
+        # Debounce check — skip if same violation was logged recently for this person
+        cache_key = (identifier, violation_key)
+        now = time.time()
+        last_log = _violation_log_times.get(cache_key, 0)
+        if now - last_log < VIOLATION_COOLDOWN:
+            return  # Cooldown not elapsed — skip
+
+        try:
+            from database import SessionLocal
+            db = SessionLocal()
+            try:
+                # Save annotated frame as evidence
+                log_number = f"V-{random.randint(1000, 9999)}"
+                img_filename = f"{log_number}_{int(now)}_{identifier.split(':')[1]}.jpg"
+                img_path = VIOLATION_LOG_DIR / img_filename
+                cv2.imwrite(str(img_path), annotated_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+                # Determine severity based on missing items
+                severity = "High" if len(missing) >= 2 else "Medium" if len(missing) == 1 else "Low"
+                violation_type = f"Kurang: {', '.join(missing)}"
+
+                new_log = models.Log(
+                    log_number=log_number,
+                    violation_type=violation_type,
+                    camera_id=None,
+                    student_id=student_id,
+                    severity=severity,
+                    status="Belum Dihukum",
+                    image_path=str(img_path)
+                )
+                db.add(new_log)
+                db.commit()
+
+                # Update debounce tracker
+                _violation_log_times[cache_key] = now
+
+                # Cleanup old entries from tracker (keep last 100)
+                if len(_violation_log_times) > 100:
+                    sorted_keys = sorted(_violation_log_times.items(), key=lambda x: x[1])
+                    for k, _ in sorted_keys[:len(sorted_keys) - 100]:
+                        del _violation_log_times[k]
+
+                student_label = student_names.get(student_id, f"ID:{student_id}") if student_id else "Unknown"
+                print(f"[LiveDetect] Violation logged: {student_label} — {violation_type} ({severity})")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"[LiveDetect] Failed to log violation: {e}")
 
     while True:
         loop_start = time.time()
@@ -391,26 +490,51 @@ def _generate_detection_frames():
                 last_frame_id = frame_id
                 last_detect_time = now
                 try:
-                    # Downscale for faster inference
-                    h, w = raw_frame.shape[:2]
-                    scale = min(LIVE_INFER_MAX_DIM / max(h, w), 1.0)
-                    if scale < 1.0:
-                        small_frame = cv2.resize(raw_frame, (int(w * scale), int(h * scale)),
-                                                 interpolation=cv2.INTER_LINEAR)
-                    else:
-                        small_frame = raw_frame
-
-                    # Run detection on downscaled frame (no annotation — we draw on full res)
-                    _, detections, compliance = detector.detect_frame(small_frame, annotate=False)
-
-                    # Scale detections back to original resolution and draw on full frame
-                    if scale < 1.0:
-                        for det in detections:
-                            det["bbox"] = [int(v / scale) for v in det["bbox"]]
-                        for comp in compliance:
-                            comp["person_bbox"] = [int(v / scale) for v in comp["person_bbox"]]
+                    # Run YOLO directly on raw frame — YOLO handles internal resizing (imgsz=640)
+                    # No manual downscale needed; YOLO's internal resize is optimized
+                    _, detections, compliance = detector.detect_frame(raw_frame, annotate=False)
 
                     annotated_frame = detector._draw_annotations(raw_frame.copy(), detections, compliance, lightweight=True)
+
+                    # Face recognition: identify non-compliant persons
+                    if face_recognizer is not None:
+                        for comp in compliance:
+                            if not comp["is_compliant"]:
+                                try:
+                                    student_id = face_recognizer.identify(raw_frame, comp["person_bbox"])
+                                    if student_id is None:
+                                        # Face not recognized — expand bbox to include more context
+                                        x1, y1, x2, y2 = comp["person_bbox"]
+                                        h, w = raw_frame.shape[:2]
+                                        bw, bh = x2 - x1, y2 - y1
+                                        ex1 = max(0, int(x1 - bw * 0.2))
+                                        ey1 = max(0, int(y1 - bh * 0.2))
+                                        ex2 = min(w, int(x2 + bw * 0.2))
+                                        ey2 = min(h, int(y2 + bh * 0.2))
+                                        student_id = face_recognizer.identify(raw_frame, [ex1, ey1, ex2, ey2])
+                                    if student_id is not None:
+                                        comp["identified_student_id"] = student_id
+                                        # Draw student name label above person box
+                                        student_name = student_names.get(student_id, f"ID:{student_id}")
+                                        px1, py1, px2, py2 = comp["person_bbox"]
+                                        frame_w = annotated_frame.shape[1]
+                                        sf = max(frame_w / 640, 1.0)
+                                        name_scale = 0.7 * sf
+                                        name_thick = max(2, int(2 * sf))
+                                        pad = int(6 * sf)
+                                        (text_w, text_h), _ = cv2.getTextSize(student_name, cv2.FONT_HERSHEY_SIMPLEX, name_scale, name_thick)
+                                        cv2.rectangle(annotated_frame, (px1, py1 - text_h - pad * 3), (px1 + text_w + pad * 2, py1 - pad), (0, 0, 0), -1)
+                                        cv2.putText(annotated_frame, student_name,
+                                                    (px1 + pad, py1 - pad * 2), cv2.FONT_HERSHEY_SIMPLEX,
+                                                    name_scale, (0, 255, 255), name_thick, cv2.LINE_AA)
+                                except Exception as e:
+                                    print(f"[LiveDetect] Face recognition error: {e}")
+
+                    # Auto-log violations for non-compliant persons (with debounce)
+                    for comp in compliance:
+                        if not comp["is_compliant"]:
+                            _log_violation(comp, annotated_frame)
+
                     last_annotated_frame = annotated_frame
                 except Exception:
                     last_annotated_frame = raw_frame
@@ -423,6 +547,23 @@ def _generate_detection_frames():
 
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+        else:
+            # Camera disconnected — yield the error frame so browser doesn't hang
+            error_frame = main_module.camera_stream.get_frame()
+            if error_frame is not None:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + error_frame + b'\r\n')
+            else:
+                # No frame at all — yield a placeholder
+                import numpy as np
+                placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(placeholder, "Waiting for camera...", (100, 250),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+                _, buf = cv2.imencode('.jpg', placeholder)
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+            time.sleep(0.5)  # Slow poll when camera is offline
 
         # Adaptive sleep — maintain target FPS without wasting cycles
         elapsed = time.time() - loop_start

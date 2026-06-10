@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from "react"
-import { Users, Upload, Image as ImageIcon, X, Save, Camera, Plus, List as ListIcon, Trash2, User, Pencil } from "lucide-react"
+import { useState, useRef, useEffect, useCallback } from "react"
+import { Users, Upload, Image as ImageIcon, X, Save, Camera, Plus, List as ListIcon, Trash2, User, Pencil, Video, CheckCircle, AlertCircle } from "lucide-react"
+
+const API_BASE = "http://localhost:8000"
 
 export default function Students() {
     const [activeTab, setActiveTab] = useState('list') // 'list' | 'add'
@@ -14,6 +16,15 @@ export default function Students() {
     const [formData, setFormData] = useState({ name: '', nis: '', class: '' })
     const [isSubmitting, setIsSubmitting] = useState(false)
     const fileInputRef = useRef(null)
+
+    // Camera capture states
+    const [showCameraCapture, setShowCameraCapture] = useState(false)
+    const [capturedPhotos, setCapturedPhotos] = useState(0)
+    const [isCapturing, setIsCapturing] = useState(false)
+    const [captureMessage, setCaptureMessage] = useState(null)
+    const videoRef = useRef(null)
+    const streamRef = useRef(null)
+    const MAX_PHOTOS = 10
 
     const fetchStudents = async () => {
         setIsLoading(true)
@@ -80,7 +91,165 @@ export default function Students() {
         setFormData({ name: '', nis: '', class: '' })
         clearImage()
         setEditingId(null)
+        stopCamera()
+        setShowCameraCapture(false)
+        setCapturedPhotos(0)
+        setCaptureMessage(null)
     }
+
+    // Camera capture functions
+    const startCamera = useCallback(async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+            })
+            streamRef.current = stream
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream
+            }
+        } catch (err) {
+            console.error("Camera access failed:", err)
+            setCaptureMessage({ type: 'error', text: 'Gagal mengakses kamera. Pastikan izin kamera diberikan.' })
+        }
+    }, [])
+
+    const stopCamera = useCallback(() => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+        }
+    }, [])
+
+    const handleCaptureFromCamera = async () => {
+        if (!editingId) {
+            setCaptureMessage({ type: 'error', text: 'Simpan data murid terlebih dahulu sebelum capture dataset.' })
+            return
+        }
+        if (capturedPhotos >= MAX_PHOTOS) {
+            setCaptureMessage({ type: 'error', text: `Maksimal ${MAX_PHOTOS} foto sudah tercapai.` })
+            return
+        }
+
+        // Capture frame from browser webcam video element
+        if (!videoRef.current) {
+            setCaptureMessage({ type: 'error', text: 'Kamera belum aktif. Klik "Buka Kamera" terlebih dahulu.' })
+            return
+        }
+
+        const video = videoRef.current
+        if (video.readyState < 2) {
+            setCaptureMessage({ type: 'error', text: 'Kamera masih loading, tunggu sebentar...' })
+            return
+        }
+
+        setIsCapturing(true)
+        setCaptureMessage(null)
+
+        try {
+            // Draw current video frame to canvas
+            const canvas = document.createElement('canvas')
+            canvas.width = video.videoWidth
+            canvas.height = video.videoHeight
+            const ctx = canvas.getContext('2d')
+            ctx.drawImage(video, 0, 0)
+
+            // Convert canvas to blob
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+            const file = new File([blob], `capture_${Date.now()}.jpg`, { type: 'image/jpeg' })
+
+            // Upload to backend
+            const token = localStorage.getItem('token')
+            const payload = new FormData()
+            payload.append('file', file)
+
+            const response = await fetch(`${API_BASE}/api/students/${editingId}/capture-dataset`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: payload
+            })
+
+            const data = await response.json()
+            if (response.ok) {
+                setCapturedPhotos(data.total_photos)
+                setCaptureMessage({ type: 'success', text: `Foto ke-${data.total_photos} berhasil dicapture!` })
+            } else {
+                setCaptureMessage({ type: 'error', text: data.detail || 'Gagal capture foto' })
+            }
+        } catch (err) {
+            console.error("Capture error:", err)
+            setCaptureMessage({ type: 'error', text: 'Gagal menghubungi server.' })
+        } finally {
+            setIsCapturing(false)
+        }
+    }
+
+    const handleUploadDataset = async (e) => {
+        const file = e.target.files?.[0]
+        if (!file || !editingId) return
+
+        setIsCapturing(true)
+        setCaptureMessage(null)
+
+        try {
+            const token = localStorage.getItem('token')
+            const payload = new FormData()
+            payload.append('file', file)
+
+            const response = await fetch(`${API_BASE}/api/students/${editingId}/upload-dataset`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: payload
+            })
+
+            const data = await response.json()
+            if (response.ok) {
+                setCapturedPhotos(data.total_photos)
+                setCaptureMessage({ type: 'success', text: `Foto ke-${data.total_photos} berhasil diupload!` })
+            } else {
+                setCaptureMessage({ type: 'error', text: data.detail || 'Gagal upload foto' })
+            }
+        } catch (err) {
+            console.error("Upload error:", err)
+            setCaptureMessage({ type: 'error', text: 'Gagal menghubungi server.' })
+        } finally {
+            setIsCapturing(false)
+            e.target.value = ''
+        }
+    }
+
+    useEffect(() => {
+        if (showCameraCapture) {
+            startCamera()
+        } else {
+            stopCamera()
+        }
+    }, [showCameraCapture, startCamera, stopCamera])
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => stopCamera()
+    }, [stopCamera])
+
+    // Load dataset status when editing
+    useEffect(() => {
+        if (editingId) {
+            const fetchDatasetStatus = async () => {
+                try {
+                    const token = localStorage.getItem('token')
+                    const res = await fetch(`${API_BASE}/api/students/${editingId}/dataset-status`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    })
+                    if (res.ok) {
+                        const data = await res.json()
+                        setCapturedPhotos(data.total_photos)
+                    }
+                } catch (err) {
+                    console.error("Failed to fetch dataset status", err)
+                }
+            }
+            fetchDatasetStatus()
+        }
+    }, [editingId])
 
     const handleEdit = (student) => {
         setEditingId(student.id)
@@ -327,16 +496,17 @@ export default function Students() {
 
                     {/* Upload & Preview Area */}
                     <div className="lg:col-span-2 space-y-4">
-                        <div className="flex flex-col border rounded-2xl bg-card shadow-sm p-6 h-full">
+                        {/* Main Photo Upload */}
+                        <div className="flex flex-col border rounded-2xl bg-card shadow-sm p-6">
                             <h2 className="font-semibold text-lg mb-4 flex items-center gap-2">
                                 <Camera className="w-5 h-5 text-primary" />
-                                Foto Murid
+                                Foto Utama Murid
                             </h2>
                             {!previewUrl ? (
                                 <div
                                     className={`
-                                        flex-1 relative flex flex-col items-center justify-center p-12 mt-2
-                                        border-2 border-dashed rounded-2xl transition-all duration-200 ease-in-out min-h-[300px]
+                                        relative flex flex-col items-center justify-center p-12 mt-2
+                                        border-2 border-dashed rounded-2xl transition-all duration-200 ease-in-out min-h-[200px]
                                         ${isDragging
                                             ? 'border-primary bg-primary/5 scale-[1.02]'
                                             : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'}
@@ -367,7 +537,7 @@ export default function Students() {
                                     />
                                 </div>
                             ) : (
-                                <div className="relative flex-1 flex flex-col overflow-hidden border rounded-2xl bg-muted/30">
+                                <div className="relative flex flex-col overflow-hidden border rounded-2xl bg-muted/30">
                                     <div className="flex items-center justify-between p-4 border-b bg-background/50 backdrop-blur-sm z-10">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2 bg-primary/10 text-primary rounded-lg">
@@ -391,16 +561,133 @@ export default function Students() {
                                             <X className="w-4 h-4" />
                                         </button>
                                     </div>
-                                    <div className="relative aspect-video bg-black/5 flex items-center justify-center p-4 flex-1 h-[300px]">
+                                    <div className="relative bg-black/5 flex items-center justify-center p-4 h-[200px]">
                                         <img
                                             src={previewUrl}
                                             alt="Preview"
-                                            className="h-full w-auto max-h-[400px] rounded-lg object-contain shadow-sm"
+                                            className="h-full w-auto max-h-[200px] rounded-lg object-contain shadow-sm"
                                         />
                                     </div>
                                 </div>
                             )}
                         </div>
+
+                        {/* Dataset Photo Capture Section — only show after student is saved */}
+                        {editingId && (
+                            <div className="flex flex-col border rounded-2xl bg-card shadow-sm p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="font-semibold text-lg flex items-center gap-2">
+                                        <Video className="w-5 h-5 text-primary" />
+                                        Dataset Wajah
+                                    </h2>
+                                    <span className={`text-sm font-medium px-3 py-1 rounded-full ${
+                                        capturedPhotos >= 5 ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'
+                                    }`}>
+                                        {capturedPhotos}/{MAX_PHOTOS} foto
+                                    </span>
+                                </div>
+
+                                <p className="text-sm text-muted-foreground mb-4">
+                                    Ambil 5-10 foto dari berbagai sudut untuk meningkatkan akurasi pengenalan wajah.
+                                    Pastikan wajah terlihat jelas di kamera.
+                                </p>
+
+                                {/* Camera Preview */}
+                                {showCameraCapture && (
+                                    <div className="relative mb-4 rounded-xl overflow-hidden border bg-black">
+                                        <video
+                                            ref={videoRef}
+                                            autoPlay
+                                            playsInline
+                                            muted
+                                            className="w-full max-h-[300px] object-contain"
+                                        />
+                                        <div className="absolute bottom-3 left-3 flex items-center gap-2 px-2 py-1 rounded-md bg-black/60 text-white text-xs">
+                                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                            Live Preview
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Capture Message */}
+                                {captureMessage && (
+                                    <div className={`flex items-center gap-2 p-3 mb-4 rounded-lg text-sm ${
+                                        captureMessage.type === 'success'
+                                            ? 'bg-green-500/10 text-green-600 border border-green-500/20'
+                                            : 'bg-red-500/10 text-red-600 border border-red-500/20'
+                                    }`}>
+                                        {captureMessage.type === 'success'
+                                            ? <CheckCircle className="w-4 h-4 shrink-0" />
+                                            : <AlertCircle className="w-4 h-4 shrink-0" />
+                                        }
+                                        {captureMessage.text}
+                                    </div>
+                                )}
+
+                                {/* Action Buttons */}
+                                <div className="flex flex-wrap gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCameraCapture(!showCameraCapture)}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                            showCameraCapture
+                                                ? 'bg-red-500/10 text-red-600 border border-red-500/30 hover:bg-red-500/20'
+                                                : 'bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20'
+                                        }`}
+                                    >
+                                        <Video className="w-4 h-4" />
+                                        {showCameraCapture ? 'Tutup Kamera' : 'Buka Kamera'}
+                                    </button>
+
+                                    {showCameraCapture && (
+                                        <button
+                                            type="button"
+                                            onClick={handleCaptureFromCamera}
+                                            disabled={isCapturing || capturedPhotos >= MAX_PHOTOS}
+                                            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Camera className="w-4 h-4" />
+                                            {isCapturing ? 'Capturing...' : 'Capture Foto'}
+                                        </button>
+                                    )}
+
+                                    <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${
+                                        capturedPhotos >= MAX_PHOTOS
+                                            ? 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+                                            : 'bg-blue-500/10 text-blue-600 border border-blue-500/30 hover:bg-blue-500/20'
+                                    }`}>
+                                        <Upload className="w-4 h-4" />
+                                        Upload Foto
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            capture="user"
+                                            className="hidden"
+                                            onChange={handleUploadDataset}
+                                            disabled={capturedPhotos >= MAX_PHOTOS}
+                                        />
+                                    </label>
+                                </div>
+
+                                {/* Progress indicator */}
+                                {capturedPhotos > 0 && (
+                                    <div className="mt-4">
+                                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                                            <span>Progress Dataset</span>
+                                            <span>{capturedPhotos >= 5 ? '✓ Cukup untuk identifikasi' : `Minimal 5 foto diperlukan (${5 - capturedPhotos} lagi)`}</span>
+                                        </div>
+                                        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-300 ${
+                                                    capturedPhotos >= 5 ? 'bg-green-500' : 'bg-amber-500'
+                                                }`}
+                                                style={{ width: `${Math.min((capturedPhotos / MAX_PHOTOS) * 100, 100)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

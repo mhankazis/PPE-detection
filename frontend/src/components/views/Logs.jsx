@@ -18,9 +18,9 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react"
+import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp, X, CheckSquare, Square, Trash, AlertTriangle } from "lucide-react"
 
-const availableViolations = ["No Helmet", "No Vest", "No Gloves", "No Goggles", "Unauthorized Area"]
+const availableViolations = ["Helmet", "Uniform", "Glasses"]
 
 export default function Logs() {
     const [logs, setLogs] = useState([])
@@ -49,6 +49,11 @@ export default function Logs() {
     const [previewUrl, setPreviewUrl] = useState(null)
     const [removeImage, setRemoveImage] = useState(false)
     const fileInputRef = useRef(null)
+
+    // Bulk selection state
+    const [selectedIds, setSelectedIds] = useState(new Set())
+    const [bulkSeverity, setBulkSeverity] = useState("")
+    const [bulkStatus, setBulkStatus] = useState("")
 
     const fetchLogs = async () => {
         setIsLoading(true);
@@ -170,8 +175,11 @@ export default function Logs() {
     }
 
     const handleEdit = (log) => {
+        // Strip "Kurang: " prefix so badge toggles match availableViolations
+        const rawType = log.type ? log.type.replace(/^Kurang:\s*/, '') : ''
         setFormData({
             ...log,
+            type: rawType,
             student: log.student_id ? log.student_id.toString() : "",
             time: log.time_input || log.time
         })
@@ -219,27 +227,88 @@ export default function Logs() {
         }
     }
 
+    // Bulk selection helpers
+    const toggleSelect = (id) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+        })
+    }
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === paginatedLogs.length) {
+            setSelectedIds(new Set())
+        } else {
+            setSelectedIds(new Set(paginatedLogs.map(l => l.id)))
+        }
+    }
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.size === 0) return
+        if (!window.confirm(`Delete ${selectedIds.size} selected log(s)?`)) return
+        try {
+            const token = localStorage.getItem('token')
+            await fetch('http://localhost:8000/api/logs/bulk-delete', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ log_numbers: [...selectedIds] })
+            })
+            setSelectedIds(new Set())
+            fetchLogs()
+        } catch (err) {
+            console.error("Bulk delete failed", err)
+        }
+    }
+
+    const handleBulkUpdate = async () => {
+        if (selectedIds.size === 0) return
+        if (!bulkSeverity && !bulkStatus) {
+            alert("Select at least one field to update (severity or status).")
+            return
+        }
+        try {
+            const token = localStorage.getItem('token')
+            const params = new URLSearchParams()
+            if (bulkSeverity) params.append('severity', bulkSeverity)
+            if (bulkStatus) params.append('status', bulkStatus)
+            await fetch(`http://localhost:8000/api/logs/bulk-update?${params.toString()}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ log_numbers: [...selectedIds] })
+            })
+            setSelectedIds(new Set())
+            setBulkSeverity("")
+            setBulkStatus("")
+            fetchLogs()
+        } catch (err) {
+            console.error("Bulk update failed", err)
+        }
+    }
+
     const handleSaveAdd = async () => {
         try {
             const token = localStorage.getItem('token');
             const payload = new FormData();
-            payload.append('violation_type', formData.type || '');
+            const violationType = formData.type ? `Kurang: ${formData.type}` : '';
+            payload.append('violation_type', violationType);
             payload.append('severity', formData.severity);
             payload.append('student_id', formData.student || 'null');
             payload.append('camera_id', 'null'); // default
-            
+
             if (selectedImage) {
                 payload.append('file', selectedImage);
             }
 
             const response = await fetch('http://localhost:8000/api/logs', {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Authorization': `Bearer ${token}`
                 },
                 body: payload
             });
-            
+
             if (response.ok) {
                 setIsAddOpen(false);
                 fetchLogs();
@@ -258,24 +327,25 @@ export default function Logs() {
         try {
             const token = localStorage.getItem('token');
             const payload = new FormData();
-            payload.append('violation_type', formData.type || '');
+            const violationType = formData.type ? `Kurang: ${formData.type}` : '';
+            payload.append('violation_type', violationType);
             payload.append('severity', formData.severity);
             payload.append('status', formData.status);
             payload.append('student_id', formData.student || 'null');
             payload.append('remove_image', removeImage.toString());
-            
+
             if (selectedImage) {
                 payload.append('file', selectedImage);
             }
 
             const response = await fetch(`http://localhost:8000/api/logs/${formData.id}`, {
                 method: 'PUT',
-                headers: { 
+                headers: {
                     'Authorization': `Bearer ${token}`
                 },
                 body: payload
             });
-            
+
             if (response.ok) {
                 setIsEditOpen(false);
                 fetchLogs();
@@ -370,8 +440,8 @@ export default function Logs() {
                 </div>
                 <div className="space-y-2">
                     <label className="text-sm font-medium">Upload Image Snapshot</label>
-                    <input 
-                        type="file" 
+                    <input
+                        type="file"
                         accept="image/*"
                         onChange={handleImageChange}
                         ref={fileInputRef}
@@ -381,8 +451,8 @@ export default function Logs() {
                         <div className="mt-2 relative aspect-video w-full max-w-[200px] overflow-hidden rounded-md border group">
                             <img src={previewUrl} alt="Preview" className="object-cover w-full h-full" />
                             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <button 
-                                    type="button" 
+                                <button
+                                    type="button"
                                     onClick={clearImage}
                                     className="p-2 bg-destructive text-destructive-foreground rounded-full hover:bg-destructive/90"
                                 >
@@ -527,10 +597,55 @@ export default function Logs() {
                         </div>
                     </div>
                 </CardHeader>
+
+                {/* Bulk action bar */}
+                {selectedIds.size > 0 && (
+                    <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 border-b">
+                        <span className="text-sm font-medium">{selectedIds.size} selected</span>
+                        <select
+                            className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                            value={bulkSeverity}
+                            onChange={(e) => setBulkSeverity(e.target.value)}
+                        >
+                            <option value="">Set Severity...</option>
+                            <option value="Low">Low</option>
+                            <option value="Medium">Medium</option>
+                            <option value="High">High</option>
+                            <option value="Critical">Critical</option>
+                        </select>
+                        <select
+                            className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                            value={bulkStatus}
+                            onChange={(e) => setBulkStatus(e.target.value)}
+                        >
+                            <option value="">Set Status...</option>
+                            <option value="Belum Dihukum">Belum Dihukum</option>
+                            <option value="Sudah Dihukum">Sudah Dihukum</option>
+                        </select>
+                        <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleBulkUpdate}>
+                            <Pencil className="w-3 h-3" /> Apply
+                        </Button>
+                        <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={handleBulkDelete}>
+                            <Trash2 className="w-3 h-3" /> Delete
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8" onClick={() => setSelectedIds(new Set())}>
+                            Clear
+                        </Button>
+                    </div>
+                )}
+
                 <CardContent className="p-0 overflow-x-auto">
                     <Table className="min-w-[900px]">
                         <TableHeader>
                             <TableRow className="bg-muted/20">
+                                <TableHead className="w-[40px] py-4 text-center">
+                                    <button onClick={toggleSelectAll} className="text-muted-foreground hover:text-foreground transition-colors">
+                                        {selectedIds.size === paginatedLogs.length && paginatedLogs.length > 0
+                                            ? <CheckSquare className="w-4 h-4 text-primary" />
+                                            : <Square className="w-4 h-4" />
+                                        }
+                                    </button>
+                                </TableHead>
                                 <TableHead className="w-[100px] py-4 whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('id')}>
                                     <div className="flex items-center gap-1">ID {sortConfig.key === 'id' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
@@ -558,18 +673,26 @@ export default function Logs() {
                         <TableBody>
                             {isLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-24 text-center">
+                                    <TableCell colSpan={9} className="h-24 text-center">
                                         Memuat data...
                                     </TableCell>
                                 </TableRow>
                             ) : paginatedLogs.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-24 text-center">
+                                    <TableCell colSpan={9} className="h-24 text-center">
                                         No logs found matching your criteria.
                                     </TableCell>
                                 </TableRow>
                             ) : paginatedLogs.map((log) => (
-                                <TableRow key={log.id} className="cursor-default hover:bg-muted/50 transition-colors">
+                                <TableRow key={log.id} className={"cursor-default hover:bg-muted/50 transition-colors" + (selectedIds.has(log.id) ? " bg-primary/5" : "")}>
+                                    <TableCell className="text-center">
+                                        <button onClick={() => toggleSelect(log.id)} className="text-muted-foreground hover:text-foreground transition-colors">
+                                            {selectedIds.has(log.id)
+                                                ? <CheckSquare className="w-4 h-4 text-primary" />
+                                                : <Square className="w-4 h-4" />
+                                            }
+                                        </button>
+                                    </TableCell>
                                     <TableCell className="font-medium font-mono text-sm">{log.id}</TableCell>
                                     <TableCell>
                                         <div className="font-medium">
@@ -616,9 +739,9 @@ export default function Logs() {
                                                     <div className="mt-4">
                                                         <div className="aspect-video w-full bg-muted rounded-lg overflow-hidden relative group">
                                                             {selectedLog?.image_path ? (
-                                                                <img 
-                                                                    src={`http://localhost:8000/${selectedLog.image_path.replace(/\\/g, '/')}`} 
-                                                                    alt="Violation snapshot" 
+                                                                <img
+                                                                    src={`http://localhost:8000/${selectedLog.image_path.replace(/\\/g, '/')}`}
+                                                                    alt="Violation snapshot"
                                                                     className="w-full h-full object-contain bg-black/90"
                                                                 />
                                                             ) : (
@@ -632,7 +755,20 @@ export default function Logs() {
                                                                 </>
                                                             )}
                                                         </div>
-                                                        <div className="grid grid-cols-2 gap-4 mt-6">
+                                                        <div className="mt-4">
+                                                            <p className="text-sm font-medium text-muted-foreground mb-2">Violations Detected</p>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {selectedLog?.type ? selectedLog.type.split(', ').map((v, i) => (
+                                                                    <Badge key={i} variant="destructive" className="gap-1">
+                                                                        <AlertTriangle className="w-3 h-3" />
+                                                                        {v}
+                                                                    </Badge>
+                                                                )) : (
+                                                                    <span className="text-sm text-muted-foreground">No violations recorded</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-4 mt-4">
                                                             <div>
                                                                 <p className="text-sm font-medium text-muted-foreground">Detection Details</p>
                                                                 <div className="mt-2 space-y-1">

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Enum, TIMESTAMP
+from sqlalchemy import Column, Integer, String, ForeignKey, Enum, TIMESTAMP, LargeBinary
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -54,3 +54,15 @@ class Log(Base):
 
     camera = relationship("Camera", back_populates="logs")
     student = relationship("Student", back_populates="logs")
+
+class FaceEmbedding(Base):
+    __tablename__ = "face_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True)
+    embedding = Column(LargeBinary, nullable=False)  # Serialized numpy array (512 floats)
+    photo_path = Column(String(255), nullable=True)
+    photo_index = Column(Integer, nullable=False, default=0)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    student = relationship("Student")

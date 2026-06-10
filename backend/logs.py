@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -138,3 +138,41 @@ def delete_log(log_number: str, db: Session = Depends(get_db)):
     db.delete(log)
     db.commit()
     return {"message": "Log deleted successfully"}
+
+@router.post("/bulk-delete")
+def bulk_delete_logs(log_numbers: list[str] = Body(..., embed=True), db: Session = Depends(get_db)):
+    if not log_numbers:
+        raise HTTPException(status_code=400, detail="No log numbers provided")
+    
+    deleted = 0
+    for ln in log_numbers:
+        log = db.query(models.Log).filter(models.Log.log_number == ln).first()
+        if log:
+            db.delete(log)
+            deleted += 1
+    
+    db.commit()
+    return {"message": f"Deleted {deleted} log(s)", "deleted": deleted}
+
+@router.post("/bulk-update")
+def bulk_update_logs(
+    log_numbers: list[str] = Body(..., embed=True),
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    if not log_numbers:
+        raise HTTPException(status_code=400, detail="No log numbers provided")
+    
+    updated = 0
+    for ln in log_numbers:
+        log = db.query(models.Log).filter(models.Log.log_number == ln).first()
+        if log:
+            if severity:
+                log.severity = severity
+            if status:
+                log.status = status
+            updated += 1
+    
+    db.commit()
+    return {"message": f"Updated {updated} log(s)", "updated": updated}

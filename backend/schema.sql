@@ -63,3 +63,18 @@ CREATE TABLE `logs` (
   FOREIGN KEY (`camera_id`) REFERENCES `cameras`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`student_id`) REFERENCES `students`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+-- Table structure for table `face_embeddings`
+-- Stores face embedding vectors per student (one row per dataset photo)
+-- --------------------------------------------------------
+CREATE TABLE `face_embeddings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `student_id` INT NOT NULL,
+  `embedding` BLOB NOT NULL COMMENT 'Serialized numpy embedding vector (512 floats)',
+  `photo_path` VARCHAR(255) DEFAULT NULL COMMENT 'Path to the source photo file',
+  `photo_index` INT NOT NULL DEFAULT 0 COMMENT 'Order index for multiple photos per student',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`student_id`) REFERENCES `students`(`id`) ON DELETE CASCADE,
+  INDEX `idx_student_id` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

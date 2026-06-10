@@ -2,42 +2,79 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2, ShieldAlert, Eye, EyeOff, Scan } from "lucide-react"
+import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2, ShieldAlert, Eye, EyeOff, Scan, Plug, Unplug } from "lucide-react"
 
 const API_BASE = "http://localhost:8000"
 
 export default function LiveFeed() {
-    const [isStreamLoading, setIsStreamLoading] = useState(true)
+    const [isStreamLoading, setIsStreamLoading] = useState(false)
     const [detectionMode, setDetectionMode] = useState(false)
+    const [isConnected, setIsConnected] = useState(false)
     const imgRef = useRef(null)
+    const loadingTimerRef = useRef(null)
 
     // Cleanup the stream when navigating away to prevent hanging requests
     useEffect(() => {
         return () => {
             if (imgRef.current) {
-                // Setting src to empty string forces the browser to abort the active stream request
                 imgRef.current.src = "";
+            }
+            if (loadingTimerRef.current) {
+                clearTimeout(loadingTimerRef.current);
             }
         }
     }, [])
 
-    // When toggling detection mode, reset loading state and update stream URL
+    // When toggling detection mode while connected, restart stream
     useEffect(() => {
+        if (!isConnected) return
+
         setIsStreamLoading(true)
         if (imgRef.current) {
-            // Force stream restart by resetting src
             const newSrc = detectionMode
                 ? `${API_BASE}/api/detect/live`
                 : `${API_BASE}/api/video_feed`
             imgRef.current.src = ""
-            // Small delay to ensure old stream is aborted
             setTimeout(() => {
                 if (imgRef.current) {
                     imgRef.current.src = newSrc
                 }
             }, 100)
         }
-    }, [detectionMode])
+
+        // Safety timeout: dismiss loading after 8s even if onLoad never fires
+        if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+        loadingTimerRef.current = setTimeout(() => {
+            setIsStreamLoading(false)
+        }, 8000)
+
+        return () => {
+            if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+        }
+    }, [detectionMode, isConnected])
+
+    const handleConnect = () => {
+        setIsConnected(true)
+        setIsStreamLoading(true)
+        // Stream src will be set by the useEffect above
+        if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
+        loadingTimerRef.current = setTimeout(() => {
+            setIsStreamLoading(false)
+        }, 8000)
+    }
+
+    const handleDisconnect = () => {
+        setIsConnected(false)
+        setIsStreamLoading(false)
+        setDetectionMode(false)
+        if (imgRef.current) {
+            imgRef.current.src = ""
+        }
+        if (loadingTimerRef.current) {
+            clearTimeout(loadingTimerRef.current)
+            loadingTimerRef.current = null
+        }
+    }
 
     const streamUrl = detectionMode
         ? `${API_BASE}/api/detect/live`
@@ -49,39 +86,67 @@ export default function LiveFeed() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Live CCTV Feed</h1>
                     <p className="text-muted-foreground mt-1">
-                        {detectionMode
-                            ? "YOLOv11 real-time PPE detection active."
-                            : "Raw camera stream. Aktifkan Detection Mode untuk deteksi APD."}
+                        {!isConnected
+                            ? "Klik Connect Camera untuk memulai live feed CCTV."
+                            : detectionMode
+                                ? "YOLOv11 real-time PPE detection active."
+                                : "Raw camera stream. Aktifkan Detection Mode untuk deteksi APD."}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    {/* Detection Mode Toggle */}
+                    {/* Connect / Disconnect Button */}
                     <button
-                        onClick={() => setDetectionMode(!detectionMode)}
+                        onClick={isConnected ? handleDisconnect : handleConnect}
                         className={`
                             flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm
                             border transition-all duration-300
-                            ${detectionMode
-                                ? 'bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25 hover:bg-primary/90'
-                                : 'bg-card text-muted-foreground border-border hover:bg-accent hover:text-accent-foreground'}
+                            ${isConnected
+                                ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-600/25 hover:bg-red-700'
+                                : 'bg-green-600 text-white border-green-600 shadow-lg shadow-green-600/25 hover:bg-green-700'}
                         `}
                     >
-                        {detectionMode ? (
+                        {isConnected ? (
                             <>
-                                <Scan className="w-4 h-4 animate-pulse" />
-                                Detection ON
+                                <Unplug className="w-4 h-4" />
+                                Disconnect
                             </>
                         ) : (
                             <>
-                                <Eye className="w-4 h-4" />
-                                Detection OFF
+                                <Plug className="w-4 h-4" />
+                                Connect Camera
                             </>
                         )}
                     </button>
 
-                    <Badge variant="outline" className={`${detectionMode ? 'text-green-500 border-green-500/50' : 'text-blue-500 border-blue-500/50'}`}>
-                        <span className={`w-2 h-2 rounded-full mr-2 animate-pulse ${detectionMode ? 'bg-green-500' : 'bg-blue-500'}`} />
-                        {detectionMode ? 'YOLOv11 Active' : 'Raw Stream'}
+                    {/* Detection Mode Toggle — only when connected */}
+                    {isConnected && (
+                        <button
+                            onClick={() => setDetectionMode(!detectionMode)}
+                            className={`
+                                flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm
+                                border transition-all duration-300
+                                ${detectionMode
+                                    ? 'bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/25 hover:bg-primary/90'
+                                    : 'bg-card text-muted-foreground border-border hover:bg-accent hover:text-accent-foreground'}
+                            `}
+                        >
+                            {detectionMode ? (
+                                <>
+                                    <Scan className="w-4 h-4 animate-pulse" />
+                                    Detection ON
+                                </>
+                            ) : (
+                                <>
+                                    <Eye className="w-4 h-4" />
+                                    Detection OFF
+                                </>
+                            )}
+                        </button>
+                    )}
+
+                    <Badge variant="outline" className={`${!isConnected ? 'text-gray-500 border-gray-500/50' : detectionMode ? 'text-green-500 border-green-500/50' : 'text-blue-500 border-blue-500/50'}`}>
+                        <span className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'animate-pulse' : ''} ${!isConnected ? 'bg-gray-500' : detectionMode ? 'bg-green-500' : 'bg-blue-500'}`} />
+                        {!isConnected ? 'Offline' : detectionMode ? 'YOLOv11 Active' : 'Raw Stream'}
                     </Badge>
                 </div>
             </div>
@@ -90,8 +155,17 @@ export default function LiveFeed() {
                 {/* Video Player */}
                 <Card className="lg:col-span-3 flex flex-col overflow-hidden border-2 border-muted bg-black/5 dark:bg-black/40">
                     <div className="flex-1 relative flex items-center justify-center min-h-[400px] bg-black overflow-hidden">
+                        {/* Disconnected Placeholder */}
+                        {!isConnected && (
+                            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black text-muted-foreground">
+                                <Camera className="w-16 h-16 mb-4 text-muted-foreground/40" />
+                                <p className="text-lg font-medium text-muted-foreground/60">Camera Offline</p>
+                                <p className="text-sm text-muted-foreground/40 mt-1">Klik "Connect Camera" untuk memulai live feed</p>
+                            </div>
+                        )}
+
                         {/* Loading Overlay */}
-                        {isStreamLoading && (
+                        {isConnected && isStreamLoading && (
                             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 text-muted-foreground">
                                 <Loader2 className="w-10 h-10 animate-spin mb-4 text-primary" />
                                 <p className="text-sm font-medium animate-pulse">
@@ -100,14 +174,27 @@ export default function LiveFeed() {
                             </div>
                         )}
 
-                        {/* Live Stream from backend */}
+                        {/* Live Stream from backend — only set src when connected */}
                         <img
                             ref={imgRef}
-                            src={streamUrl}
+                            src={isConnected ? streamUrl : ""}
                             alt="Live CCTV Feed"
-                            onLoad={() => setIsStreamLoading(false)}
-                            onError={() => setIsStreamLoading(false)}
-                            className={`absolute inset-0 w-full h-full object-contain z-10 transition-opacity duration-500 ${isStreamLoading ? 'opacity-0' : 'opacity-100'}`}
+                            onLoad={() => {
+                                setIsStreamLoading(false)
+                                if (loadingTimerRef.current) {
+                                    clearTimeout(loadingTimerRef.current)
+                                    loadingTimerRef.current = null
+                                }
+                            }}
+                            onError={(e) => {
+                                console.error("Stream load error:", e)
+                                setIsStreamLoading(false)
+                                if (loadingTimerRef.current) {
+                                    clearTimeout(loadingTimerRef.current)
+                                    loadingTimerRef.current = null
+                                }
+                            }}
+                            className={`absolute inset-0 w-full h-full object-contain z-10 transition-opacity duration-500 ${!isConnected || isStreamLoading ? 'opacity-0' : 'opacity-100'}`}
                         />
 
                         {/* Detection Mode Badge Overlay */}

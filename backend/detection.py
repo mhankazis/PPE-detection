@@ -59,10 +59,17 @@ class PPEDetector:
 
     def _load_model(self):
         """Load the YOLO model from disk and warm it up."""
-        from ultralytics import YOLO
-        import torch
+        try:
+            from ultralytics import YOLO
+            import torch
+        except ImportError:
+            print(f"[PPE Detector] ERROR: ultralytics not installed. Run: pip install ultralytics")
+            self.model = None
+            return
         if not MODEL_PATH.exists():
-            raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+            print(f"[PPE Detector] ERROR: Model file not found: {MODEL_PATH}")
+            self.model = None
+            return
         print(f"[PPE Detector] Loading model from {MODEL_PATH}...")
         self.model = YOLO(str(MODEL_PATH))
 
@@ -304,8 +311,16 @@ class PPEDetector:
             lightweight: If True, skip label backgrounds and use thinner lines for faster drawing
         """
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.6 if lightweight else 0.6
-        thickness = 2
+        
+        # Scale font and line thickness based on frame resolution
+        # Reference: 640px width = scale 0.6, thickness 2
+        frame_w = frame.shape[1]
+        scale_factor = max(frame_w / 640, 1.0)
+        font_scale = 0.6 * scale_factor
+        status_font_scale = 0.5 * scale_factor
+        thickness = max(2, int(2 * scale_factor))
+        text_thickness = max(1, int(1 * scale_factor))
+        padding = int(8 * scale_factor)
 
         # Draw all detection boxes
         for det in detections:
@@ -317,18 +332,11 @@ class PPEDetector:
             # Draw box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
-            if lightweight:
-                # Compact label with background — readable but faster than full mode
-                text = f"{label} {conf:.0%}"
-                (tw, th), _ = cv2.getTextSize(text, font, font_scale, 1)
-                cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw + 8, y1), color, -1)
-                cv2.putText(frame, text, (x1 + 4, y1 - 5), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
-            else:
-                # Full label with background
-                text = f"{label} {conf:.0%}"
-                (tw, th), _ = cv2.getTextSize(text, font, font_scale, 1)
-                cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw + 8, y1), color, -1)
-                cv2.putText(frame, text, (x1 + 4, y1 - 5), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+            # Label with background
+            text = f"{label} {conf:.0%}"
+            (tw, th), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
+            cv2.rectangle(frame, (x1, y1 - th - padding - 2), (x1 + tw + padding, y1), color, -1)
+            cv2.putText(frame, text, (x1 + padding // 2, y1 - padding // 2), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
 
         # Draw compliance status on person boxes
         for comp in compliance:
@@ -343,9 +351,9 @@ class PPEDetector:
                 status_color = (0, 0, 255)  # Red
 
             # Draw status bar at bottom of person box
-            (tw, th), _ = cv2.getTextSize(status_text, font, 0.5, 1)
-            cv2.rectangle(frame, (x1, y2), (x1 + tw + 12, y2 + th + 12), status_color, -1)
-            cv2.putText(frame, status_text, (x1 + 6, y2 + th + 6), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            (tw, th), _ = cv2.getTextSize(status_text, font, status_font_scale, text_thickness)
+            cv2.rectangle(frame, (x1, y2), (x1 + tw + padding + 4, y2 + th + padding + 4), status_color, -1)
+            cv2.putText(frame, status_text, (x1 + padding // 2, y2 + th + padding // 2 + 2), font, status_font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
 
         return frame
 
@@ -355,8 +363,12 @@ _detector = None
 
 
 def get_detector() -> PPEDetector:
-    """Get or create the global PPE detector instance."""
+    """Get or create the global PPE detector instance. Retries loading if model failed."""
     global _detector
     if _detector is None:
         _detector = PPEDetector()
+    elif _detector.model is None:
+        # Model failed to load previously — retry
+        print("[PPE Detector] Retrying model load...")
+        _detector._load_model()
     return _detector

@@ -20,6 +20,44 @@ app.include_router(students_router)
 app.include_router(logs_router)
 app.include_router(detect_router)
 
+
+@app.on_event("startup")
+def startup_preload():
+    """Preload YOLO model and student face embeddings on app startup."""
+    # Preload YOLO PPE detection model
+    try:
+        from detection import get_detector
+        detector = get_detector()
+        if detector.model is not None:
+            print("[Startup] YOLO PPE detector loaded and ready.")
+        else:
+            print("[Startup] WARNING: YOLO model failed to load — detection will not work.")
+    except Exception as e:
+        print(f"[Startup] YOLO preload failed: {e}")
+
+    # Preload student face embeddings
+    from database import SessionLocal
+    try:
+        from face_recognition import preload_student_embeddings
+        db = SessionLocal()
+        try:
+            preload_student_embeddings(db)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[Startup] Face recognition preload skipped: {e}")
+
+
+@app.get("/api/face-status")
+def face_recognition_status():
+    """Return face recognition cache status."""
+    try:
+        from face_recognition import get_recognizer
+        recognizer = get_recognizer()
+        return {"enabled": True, "enrolled_students": recognizer.get_cache_size()}
+    except Exception:
+        return {"enabled": False, "enrolled_students": 0}
+
 # Mount a directory to serve uploaded images statically
 from fastapi.staticfiles import StaticFiles
 import os
@@ -150,17 +188,17 @@ def generate_frames():
     import time
     camera_stream.start()
     
-    # Send loading frame initially if no frame is ready
-    if camera_stream.get_frame() is None:
-        loading_frame = create_error_frame("Connecting to camera stream...")
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + loading_frame + b'\r\n')
-                
+    # Keep sending loading frames until camera produces real frames
+    loading_frame = create_error_frame("Connecting to camera stream...")
     while True:
         frame_bytes = camera_stream.get_frame()
         if frame_bytes is not None:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        else:
+            # Camera not ready yet — keep sending loading frame so browser doesn't timeout
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + loading_frame + b'\r\n')
         # Limit frame rate to ~30fps to avoid CPU overload
         time.sleep(0.033)
 
