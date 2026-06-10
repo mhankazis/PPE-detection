@@ -10,8 +10,8 @@ const navigation = [
     { name: 'Data Murid', href: '/students', icon: Users },
     { name: 'Upload', href: '/upload', icon: Upload },
     { name: 'Live Feed', href: '/live', icon: Video },
-    { name: 'Violation Logs', href: '/logs', icon: FileText },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Log Pelanggaran', href: '/logs', icon: FileText },
+    { name: 'Pengaturan', href: '/settings', icon: Settings },
 ]
 
 export function Sidebar() {
@@ -31,7 +31,7 @@ export function Sidebar() {
                         <ShieldAlert className="w-6 h-6" />
                     </div>
                     {!isCollapsed && (
-                        <span className="text-xl font-bold tracking-tight">PPE Detect</span>
+                        <span className="text-xl font-bold tracking-tight">Deteksi APD</span>
                     )}
                 </div>
                 {!isCollapsed && <ModeToggle />}

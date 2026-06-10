@@ -58,6 +58,81 @@ def face_recognition_status():
     except Exception:
         return {"enabled": False, "enrolled_students": 0}
 
+@app.get("/api/dashboard")
+def dashboard_stats():
+    """Return dashboard statistics from the database."""
+    from database import SessionLocal
+    from datetime import datetime, timedelta
+    import sqlalchemy as sa
+
+    db = SessionLocal()
+    try:
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+
+        # Total violations today
+        violations_today = db.query(models.Log).filter(models.Log.timestamp >= today_start).count()
+
+        # Total violations all time
+        violations_total = db.query(models.Log).count()
+
+        # Total students
+        total_students = db.query(models.Student).count()
+
+        # Violations still "Belum Dihukum"
+        unresolved = db.query(models.Log).filter(models.Log.status == "Belum Dihukum").count()
+
+        # Resolved
+        resolved = db.query(models.Log).filter(models.Log.status == "Sudah Dihukum").count()
+
+        # Compliance rate: resolved / total (or 100 if no violations)
+        compliance_rate = round((resolved / violations_total * 100) if violations_total > 0 else 100, 1)
+
+        # Severity breakdown
+        severity_counts = {}
+        for sev in ["Low", "Medium", "High", "Critical"]:
+            severity_counts[sev] = db.query(models.Log).filter(models.Log.severity == sev).count()
+
+        # Recent 5 violations
+        recent = db.query(models.Log).order_by(models.Log.timestamp.desc()).limit(5).all()
+        recent_list = []
+        for log in recent:
+            ts = log.timestamp
+            student_name = log.student.name if log.student else "Unknown"
+            recent_list.append({
+                "id": log.log_number,
+                "time": ts.strftime("%I:%M %p") if ts else "",
+                "date": ts.strftime("%Y-%m-%d") if ts else "",
+                "camera": log.camera.name if log.camera else "Main Camera",
+                "type": log.violation_type,
+                "severity": log.severity,
+                "student": student_name,
+                "status": log.status,
+            })
+
+        # Violations per day (last 7 days)
+        daily = []
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            d_start = datetime.combine(d, datetime.min.time())
+            d_end = datetime.combine(d + timedelta(days=1), datetime.min.time())
+            count = db.query(models.Log).filter(models.Log.timestamp >= d_start, models.Log.timestamp < d_end).count()
+            daily.append({"date": d.strftime("%Y-%m-%d"), "day": d.strftime("%a"), "count": count})
+
+        return {
+            "violations_today": violations_today,
+            "violations_total": violations_total,
+            "total_students": total_students,
+            "unresolved": unresolved,
+            "resolved": resolved,
+            "compliance_rate": compliance_rate,
+            "severity_counts": severity_counts,
+            "recent_violations": recent_list,
+            "daily_violations": daily,
+        }
+    finally:
+        db.close()
+
 # Mount a directory to serve uploaded images statically
 from fastapi.staticfiles import StaticFiles
 import os

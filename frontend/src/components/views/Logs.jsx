@@ -20,7 +20,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp, X, CheckSquare, Square, Trash, AlertTriangle } from "lucide-react"
 
-const availableViolations = ["Helmet", "Uniform", "Glasses"]
+const availableViolations = ["Helm", "Seragam", "Kacamata"]
+
+// Mapping for backend format (Indonesian → English class names)
+const violationToEnglish = { "Helm": "Helmet", "Seragam": "Uniform", "Kacamata": "Glasses" }
+const violationFromEnglish = { "Helmet": "Helm", "Uniform": "Seragam", "Glasses": "Kacamata" }
 
 export default function Logs() {
     const [logs, setLogs] = useState([])
@@ -213,7 +217,7 @@ export default function Logs() {
     }
 
     const handleDelete = async (id) => {
-        if (window.confirm("Are you sure you want to delete this log?")) {
+        if (window.confirm("Apakah Anda yakin ingin menghapus log ini?")) {
             try {
                 const token = localStorage.getItem('token');
                 await fetch(`http://localhost:8000/api/logs/${id}`, {
@@ -247,7 +251,7 @@ export default function Logs() {
 
     const handleBulkDelete = async () => {
         if (selectedIds.size === 0) return
-        if (!window.confirm(`Delete ${selectedIds.size} selected log(s)?`)) return
+        if (!window.confirm(`Hapus ${selectedIds.size} log yang dipilih?`)) return
         try {
             const token = localStorage.getItem('token')
             await fetch('http://localhost:8000/api/logs/bulk-delete', {
@@ -265,7 +269,7 @@ export default function Logs() {
     const handleBulkUpdate = async () => {
         if (selectedIds.size === 0) return
         if (!bulkSeverity && !bulkStatus) {
-            alert("Select at least one field to update (severity or status).")
+            alert("Pilih minimal satu field untuk diperbarui (tingkat keparahan atau status).")
             return
         }
         try {
@@ -375,23 +379,23 @@ export default function Logs() {
             <div className="grid gap-4 py-4">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Date</label>
+                        <label className="text-sm font-medium">Tanggal</label>
                         <input type="date" className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                             value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Time</label>
+                        <label className="text-sm font-medium">Waktu</label>
                         <input type="time" className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                             value={formData.time} onChange={(e) => setFormData({ ...formData, time: e.target.value })} />
                     </div>
                 </div>
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">Camera</label>
+                    <label className="text-sm font-medium">Kamera</label>
                     <input className="flex h-9 w-full rounded-md border border-input bg-muted px-3 py-1 text-sm shadow-sm cursor-not-allowed"
                         value="Main Camera" readOnly disabled />
                 </div>
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">Violation Type</label>
+                    <label className="text-sm font-medium">Jenis Pelanggaran</label>
                     <div className="flex flex-wrap gap-2 mt-1">
                         {availableViolations.map(vtype => {
                             const isSelected = formData.type && formData.type.includes(vtype);
@@ -410,17 +414,17 @@ export default function Logs() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Student</label>
+                        <label className="text-sm font-medium">Siswa</label>
                         <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                             value={formData.student} onChange={(e) => setFormData({ ...formData, student: e.target.value })}>
-                            <option value="">Unknown / None</option>
+                            <option value="">Tidak Diketahui / Tidak Ada</option>
                             {studentsList.map(s => (
                                 <option key={s.id} value={s.id}>{s.name} ({s.nim})</option>
                             ))}
                         </select>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Severity</label>
+                        <label className="text-sm font-medium">Tingkat Keparahan</label>
                         <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
                             value={formData.severity} onChange={(e) => setFormData({ ...formData, severity: e.target.value })}>
                             <option value="Low">Low</option>
@@ -439,7 +443,7 @@ export default function Logs() {
                     </select>
                 </div>
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">Upload Image Snapshot</label>
+                    <label className="text-sm font-medium">Unggah Gambar Snapshot</label>
                     <input
                         type="file"
                         accept="image/*"
@@ -470,18 +474,18 @@ export default function Logs() {
         <div className="p-8 space-y-8 animate-in fade-in duration-500">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Violation Logs</h1>
-                    <p className="text-muted-foreground mt-1">Review historical PPE compliance violations.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Log Pelanggaran</h1>
+                    <p className="text-muted-foreground mt-1">Tinjau riwayat pelanggaran kepatuhan APD.</p>
                 </div>
             </div>
 
             <Card>
                 <CardHeader className="py-4 border-b bg-muted/50 flex flex-col gap-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <CardTitle className="text-lg">Recent Records</CardTitle>
+                        <CardTitle className="text-lg">Catatan Terbaru</CardTitle>
                         <div className="flex flex-col sm:flex-row gap-3">
                             <div className="flex items-center gap-2">
-                                <span className="text-sm text-muted-foreground whitespace-nowrap">Show</span>
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">Tampilkan</span>
                                 <select
                                     className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                     value={itemsPerPage}
@@ -494,13 +498,13 @@ export default function Logs() {
                                     <option value={25}>25</option>
                                     <option value={50}>50</option>
                                 </select>
-                                <span className="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline-block">entries</span>
+                                <span className="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline-block">entri</span>
                             </div>
                             <div className="relative">
                                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                 <input
                                     type="text"
-                                    placeholder="Search logs..."
+                                    placeholder="Cari log..."
                                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pl-9 sm:w-[200px]"
                                     value={searchTerm}
                                     onChange={(e) => {
@@ -522,7 +526,7 @@ export default function Logs() {
                                 </Button>
                                 {isFilterDropdownOpen && (
                                     <div className="absolute top-full left-0 mt-2 z-50 w-64 bg-background border rounded-md shadow-md p-3">
-                                        <div className="font-medium text-sm mb-2">Filter Type</div>
+                                        <div className="font-medium text-sm mb-2">Filter Jenis</div>
                                         <div className="flex flex-wrap gap-2">
                                             {availableViolations.map(vtype => {
                                                 const isSelected = selectedTypes.includes(vtype);
@@ -548,7 +552,7 @@ export default function Logs() {
                                         {selectedTypes.length > 0 && (
                                             <div className="mt-3 pt-3 border-t">
                                                 <Button variant="ghost" size="sm" className="w-full text-xs h-7" onClick={() => { setSelectedTypes([]); setCurrentPage(1); setIsFilterDropdownOpen(false); }}>
-                                                    Clear Filters
+                                                    Hapus Filter
                                                 </Button>
                                             </div>
                                         )}
@@ -573,23 +577,23 @@ export default function Logs() {
                             </div>
                             <div className="flex items-center gap-2">
                                 <Button className="gap-2" onClick={handleExportCSV}>
-                                    <Download className="w-4 h-4" /> Export CSV
+                                    <Download className="w-4 h-4" /> Ekspor CSV
                                 </Button>
 
                                 <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                                     <DialogTrigger asChild>
                                         <Button className="gap-2" variant="default" onClick={handleAdd}>
-                                            <Plus className="w-4 h-4" /> Add Log
+                                            <Plus className="w-4 h-4" /> Tambah Log
                                         </Button>
                                     </DialogTrigger>
                                     <DialogContent className="sm:max-w-[425px]">
                                         <DialogHeader>
-                                            <DialogTitle>Add New Violation Log</DialogTitle>
+                                            <DialogTitle>Tambah Log Pelanggaran Baru</DialogTitle>
                                         </DialogHeader>
                                         {renderForm()}
                                         <DialogFooter>
-                                            <Button variant="outline" onClick={() => setIsAddOpen(false)}>Cancel</Button>
-                                            <Button onClick={handleSaveAdd}>Save</Button>
+                                            <Button variant="outline" onClick={() => setIsAddOpen(false)}>Batal</Button>
+                                            <Button onClick={handleSaveAdd}>Simpan</Button>
                                         </DialogFooter>
                                     </DialogContent>
                                 </Dialog>
@@ -601,13 +605,13 @@ export default function Logs() {
                 {/* Bulk action bar */}
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 border-b">
-                        <span className="text-sm font-medium">{selectedIds.size} selected</span>
+                        <span className="text-sm font-medium">{selectedIds.size} dipilih</span>
                         <select
                             className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
                             value={bulkSeverity}
                             onChange={(e) => setBulkSeverity(e.target.value)}
                         >
-                            <option value="">Set Severity...</option>
+                            <option value="">Atur Tingkat...</option>
                             <option value="Low">Low</option>
                             <option value="Medium">Medium</option>
                             <option value="High">High</option>
@@ -618,18 +622,18 @@ export default function Logs() {
                             value={bulkStatus}
                             onChange={(e) => setBulkStatus(e.target.value)}
                         >
-                            <option value="">Set Status...</option>
+                            <option value="">Atur Status...</option>
                             <option value="Belum Dihukum">Belum Dihukum</option>
                             <option value="Sudah Dihukum">Sudah Dihukum</option>
                         </select>
                         <Button size="sm" variant="outline" className="h-8 gap-1" onClick={handleBulkUpdate}>
-                            <Pencil className="w-3 h-3" /> Apply
+                            <Pencil className="w-3 h-3" /> Terapkan
                         </Button>
                         <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={handleBulkDelete}>
-                            <Trash2 className="w-3 h-3" /> Delete
+                            <Trash2 className="w-3 h-3" /> Hapus
                         </Button>
                         <Button size="sm" variant="ghost" className="h-8" onClick={() => setSelectedIds(new Set())}>
-                            Clear
+                            Bersihkan
                         </Button>
                     </div>
                 )}
@@ -650,24 +654,24 @@ export default function Logs() {
                                     <div className="flex items-center gap-1">ID {sortConfig.key === 'id' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('date')}>
-                                    <div className="flex items-center gap-1">Date & Time {sortConfig.key === 'date' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
+                                    <div className="flex items-center gap-1">Tanggal & Waktu {sortConfig.key === 'date' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('camera')}>
-                                    <div className="flex items-center gap-1">Camera {sortConfig.key === 'camera' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
+                                    <div className="flex items-center gap-1">Kamera {sortConfig.key === 'camera' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('type')}>
-                                    <div className="flex items-center gap-1">Violation Type {sortConfig.key === 'type' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
+                                    <div className="flex items-center gap-1">Jenis Pelanggaran {sortConfig.key === 'type' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('student')}>
-                                    <div className="flex items-center gap-1">Student {sortConfig.key === 'student' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
+                                    <div className="flex items-center gap-1">Siswa {sortConfig.key === 'student' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('severity')}>
-                                    <div className="flex items-center gap-1">Severity {sortConfig.key === 'severity' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
+                                    <div className="flex items-center gap-1">Keparahan {sortConfig.key === 'severity' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
                                 <TableHead className="whitespace-nowrap cursor-pointer hover:bg-muted/50" onClick={() => handleSort('status')}>
                                     <div className="flex items-center gap-1">Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-20" />}</div>
                                 </TableHead>
-                                <TableHead className="text-center whitespace-nowrap w-[150px]">Actions</TableHead>
+                                <TableHead className="text-center whitespace-nowrap w-[150px]">Aksi</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -680,7 +684,7 @@ export default function Logs() {
                             ) : paginatedLogs.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={9} className="h-24 text-center">
-                                        No logs found matching your criteria.
+                                        Tidak ada log yang sesuai dengan kriteria Anda.
                                     </TableCell>
                                 </TableRow>
                             ) : paginatedLogs.map((log) => (
@@ -728,35 +732,31 @@ export default function Logs() {
                                         <div className="flex items-center justify-end gap-2">
                                             <Dialog>
                                                 <DialogTrigger asChild>
-                                                    <Button variant="ghost" size="icon" onClick={() => setSelectedLog(log)} title="View Snapshot">
+                                                    <Button variant="ghost" size="icon" onClick={() => setSelectedLog(log)} title="Lihat Snapshot">
                                                         <Eye className="w-4 h-4" />
                                                     </Button>
                                                 </DialogTrigger>
                                                 <DialogContent className="sm:max-w-[700px]">
                                                     <DialogHeader>
-                                                        <DialogTitle>Violation Snapshot - {selectedLog?.id}</DialogTitle>
+                                                        <DialogTitle>Snapshot Pelanggaran - {selectedLog?.id}</DialogTitle>
                                                     </DialogHeader>
                                                     <div className="mt-4">
                                                         <div className="aspect-video w-full bg-muted rounded-lg overflow-hidden relative group">
                                                             {selectedLog?.image_path ? (
                                                                 <img
                                                                     src={`http://localhost:8000/${selectedLog.image_path.replace(/\\/g, '/')}`}
-                                                                    alt="Violation snapshot"
+                                                                    alt="Snapshot pelanggaran"
                                                                     className="w-full h-full object-contain bg-black/90"
                                                                 />
                                                             ) : (
-                                                                <>
-                                                                    <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541888086425-d81bb19460b5?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center brightness-75"></div>
-                                                                    <div className="absolute top-[25%] left-[35%] w-[140px] h-[280px] border-[3px] border-red-500/90 rounded pointer-events-none">
-                                                                        <div className="absolute -top-7 left-[-3px] bg-red-500/90 text-white text-sm font-medium px-2 py-0.5 rounded shadow-sm">
-                                                                            {selectedLog?.type}
-                                                                        </div>
-                                                                    </div>
-                                                                </>
+                                                                <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
+                                                                    <AlertTriangle className="w-12 h-12 opacity-30" />
+                                                                    <span className="text-sm">Tidak ada snapshot tersedia</span>
+                                                                </div>
                                                             )}
                                                         </div>
                                                         <div className="mt-4">
-                                                            <p className="text-sm font-medium text-muted-foreground mb-2">Violations Detected</p>
+                                                            <p className="text-sm font-medium text-muted-foreground mb-2">Pelanggaran Terdeteksi</p>
                                                             <div className="flex flex-wrap gap-2">
                                                                 {selectedLog?.type ? selectedLog.type.split(', ').map((v, i) => (
                                                                     <Badge key={i} variant="destructive" className="gap-1">
@@ -764,26 +764,26 @@ export default function Logs() {
                                                                         {v}
                                                                     </Badge>
                                                                 )) : (
-                                                                    <span className="text-sm text-muted-foreground">No violations recorded</span>
+                                                                    <span className="text-sm text-muted-foreground">Tidak ada pelanggaran tercatat</span>
                                                                 )}
                                                             </div>
                                                         </div>
                                                         <div className="grid grid-cols-2 gap-4 mt-4">
                                                             <div>
-                                                                <p className="text-sm font-medium text-muted-foreground">Detection Details</p>
+                                                                <p className="text-sm font-medium text-muted-foreground">Detail Deteksi</p>
                                                                 <div className="mt-2 space-y-1">
-                                                                    <p className="text-sm"><span className="font-medium">Camera:</span> {selectedLog?.camera}</p>
-                                                                    <p className="text-sm"><span className="font-medium">Timestamp:</span> {(() => {
+                                                                    <p className="text-sm"><span className="font-medium">Kamera:</span> {selectedLog?.camera}</p>
+                                                                    <p className="text-sm"><span className="font-medium">Waktu:</span> {(() => {
                                                                         const [year, month, day] = selectedLog?.date ? selectedLog.date.split("-") : ["", "", ""];
                                                                         return selectedLog?.date ? `${day}/${month}/${year}` : "";
                                                                     })()} {selectedLog?.time}</p>
                                                                 </div>
                                                             </div>
                                                             <div>
-                                                                <p className="text-sm font-medium text-muted-foreground">Subject Info</p>
+                                                                <p className="text-sm font-medium text-muted-foreground">Informasi Subjek</p>
                                                                 <div className="mt-2 space-y-1">
-                                                                    <p className="text-sm"><span className="font-medium">Student:</span> {selectedLog?.student}</p>
-                                                                    <p className="text-sm"><span className="font-medium">Severity:</span> {selectedLog?.severity}</p>
+                                                                    <p className="text-sm"><span className="font-medium">Siswa:</span> {selectedLog?.student}</p>
+                                                                    <p className="text-sm"><span className="font-medium">Keparahan:</span> {selectedLog?.severity}</p>
                                                                     <p className="text-sm"><span className="font-medium">Status:</span> {selectedLog?.status}</p>
                                                                 </div>
                                                             </div>
@@ -800,17 +800,17 @@ export default function Logs() {
                                                 </DialogTrigger>
                                                 <DialogContent className="sm:max-w-[425px]">
                                                     <DialogHeader>
-                                                        <DialogTitle>Edit Violation Log</DialogTitle>
+                                                        <DialogTitle>Edit Log Pelanggaran</DialogTitle>
                                                     </DialogHeader>
                                                     {renderForm()}
                                                     <DialogFooter>
-                                                        <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-                                                        <Button onClick={handleSaveEdit}>Save Changes</Button>
+                                                        <Button variant="outline" onClick={() => setIsEditOpen(false)}>Batal</Button>
+                                                        <Button onClick={handleSaveEdit}>Simpan Perubahan</Button>
                                                     </DialogFooter>
                                                 </DialogContent>
                                             </Dialog>
 
-                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(log.id)} title="Delete" className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                                            <Button variant="ghost" size="icon" onClick={() => handleDelete(log.id)} title="Hapus" className="text-destructive hover:bg-destructive/10 hover:text-destructive">
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
                                         </div>
@@ -824,7 +824,7 @@ export default function Logs() {
 
             <div className="flex items-center justify-between px-2">
                 <p className="text-sm text-muted-foreground">
-                    Showing {filteredLogs.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredLogs.length)} of {filteredLogs.length} entries
+                    Menampilkan {filteredLogs.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1} sampai {Math.min(currentPage * itemsPerPage, filteredLogs.length)} dari {filteredLogs.length} entri
                 </p>
                 <div className="flex gap-2">
                     <Button
@@ -833,7 +833,7 @@ export default function Logs() {
                         disabled={currentPage === 1}
                         onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     >
-                        Previous
+                        Sebelumnya
                     </Button>
                     <Button
                         variant="outline"
@@ -841,7 +841,7 @@ export default function Logs() {
                         disabled={currentPage >= totalPages || totalPages === 0}
                         onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     >
-                        Next
+                        Berikutnya
                     </Button>
                 </div>
             </div>

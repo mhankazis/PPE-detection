@@ -17,9 +17,9 @@ export default function Login() {
         e.preventDefault();
         setIsLoading(true);
         setError('');
-        
+
         if (!username || !password) {
-            setError('Please enter both username and password.');
+            setError('Masukkan username dan password.');
             setIsLoading(false);
             return;
         }
@@ -28,7 +28,7 @@ export default function Login() {
         if (result.success) {
             navigate('/');
         } else {
-            setError(result.message || 'Login failed.');
+            setError(result.message || 'Gagal masuk.');
         }
         setIsLoading(false);
     };
@@ -49,7 +49,7 @@ export default function Login() {
                         <ShieldAlert className="h-8 w-8" />
                     </div>
                     <h2 className="text-3xl font-bold tracking-tight text-foreground">PPE Detect</h2>
-                    <p className="text-sm text-muted-foreground">Sign in to access your dashboard</p>
+                    <p className="text-sm text-muted-foreground">Masuk untuk mengakses dashboard</p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6 mt-8">
@@ -83,7 +83,7 @@ export default function Login() {
                                 <label className="text-sm font-medium leading-none text-foreground" htmlFor="password">
                                     Password
                                 </label>
-                                <a href="#" className="text-xs font-medium text-primary hover:underline transition-all">Forgot password?</a>
+                                <a href="#" className="text-xs font-medium text-primary hover:underline transition-all">Lupa password?</a>
                             </div>
                             <div className="relative group">
                                 <Lock className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -105,13 +105,13 @@ export default function Login() {
                         disabled={isLoading}
                         className="group inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground shadow-lg hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 transition-all hover:scale-[1.02] active:scale-[0.98] gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                     >
-                        {isLoading ? 'Signing In...' : 'Sign In'}
+                        {isLoading ? 'Sedang Masuk...' : 'Masuk'}
                         {!isLoading && <LogIn className="h-4 w-4 transition-transform group-hover:translate-x-1" />}
                     </button>
                 </form>
 
                 <div className="text-center text-xs text-muted-foreground/60 mt-6 font-medium">
-                    <p>Simulation Dashboard Area v1.0.0</p>
+                    <p>Dashboard Area Deteksi APD v1.0.0</p>
                 </div>
             </div>
         </div>

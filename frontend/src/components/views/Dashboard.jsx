@@ -1,31 +1,87 @@
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { AlertCircle, Camera, CheckCircle2, TrendingUp, Users } from "lucide-react"
+import { AlertCircle, Camera, CheckCircle2, TrendingUp, Users, ShieldAlert, ShieldCheck, BarChart3 } from "lucide-react"
+
+const API_BASE = "http://localhost:8000"
 
 export default function Dashboard() {
+    const [data, setData] = useState(null)
+    const [isLoading, setIsLoading] = useState(true)
+
+    useEffect(() => {
+        const fetchDashboard = async () => {
+            try {
+                const token = localStorage.getItem('token')
+                const res = await fetch(`${API_BASE}/api/dashboard`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+                if (res.ok) {
+                    const json = await res.json()
+                    setData(json)
+                }
+            } catch (err) {
+                console.error("Failed to fetch dashboard", err)
+            } finally {
+                setIsLoading(false)
+            }
+        }
+        fetchDashboard()
+        const interval = setInterval(fetchDashboard, 30000)
+        return () => clearInterval(interval)
+    }, [])
+
+    if (isLoading) {
+        return (
+            <div className="p-8 space-y-8 animate-in fade-in duration-500">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight">Ringkasan</h1>
+                        <p className="text-muted-foreground mt-1">Memuat data dashboard...</p>
+                    </div>
+                </div>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    {[1, 2, 3, 4].map(i => (
+                        <Card key={i} className="animate-pulse">
+                            <CardHeader className="pb-2">
+                                <div className="h-4 bg-muted rounded w-2/3" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="h-8 bg-muted rounded w-1/2 mb-2" />
+                                <div className="h-3 bg-muted rounded w-3/4" />
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+            </div>
+        )
+    }
+
+    const d = data || {
+        violations_today: 0, violations_total: 0, total_students: 0,
+        unresolved: 0, resolved: 0, compliance_rate: 100,
+        severity_counts: { Low: 0, Medium: 0, High: 0, Critical: 0 },
+        recent_violations: [], daily_violations: []
+    }
+
     const stats = [
-        { title: "Total Violations Today", value: "24", icon: AlertCircle, change: "+12%", color: "text-red-500" },
-        { title: "Active Cameras", value: "8/10", icon: Camera, change: "All systems operational", color: "text-blue-500" },
-        { title: "Students Detected", value: "142", icon: Users, change: "Current shift", color: "text-indigo-500" },
-        { title: "Compliance Rate", value: "94%", icon: CheckCircle2, change: "+2.4% from yesterday", color: "text-green-500" },
+        { title: "Pelanggaran Hari Ini", value: d.violations_today, icon: AlertCircle, subtitle: `${d.violations_total} total keseluruhan`, color: "text-red-500" },
+        { title: "Kamera Aktif", value: "1", icon: Camera, subtitle: "CCTV terhubung", color: "text-blue-500" },
+        { title: "Murid Terdaftar", value: d.total_students, icon: Users, subtitle: "Dengan data wajah", color: "text-indigo-500" },
+        { title: "Tingkat Kepatuhan", value: `${d.compliance_rate}%`, icon: CheckCircle2, subtitle: `${d.resolved} selesai / ${d.unresolved} menunggu`, color: "text-green-500" },
     ]
 
-    const recentViolations = [
-        { id: "V-1042", time: "10:24 AM", camera: "Cam 04 - Entrance", type: "No Helmet", severity: "High" },
-        { id: "V-1041", time: "10:15 AM", camera: "Cam 02 - Processing", type: "No Vest", severity: "Medium" },
-        { id: "V-1040", time: "09:50 AM", camera: "Cam 04 - Entrance", type: "No Helmet, No Goggles", severity: "Critical" },
-        { id: "V-1039", time: "09:12 AM", camera: "Cam 01 - Loading Dock", type: "No Gloves", severity: "Low" },
-    ]
+    const maxDaily = Math.max(...d.daily_violations.map(v => v.count), 1) // used for bar scaling
 
     return (
         <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
-                    <p className="text-muted-foreground mt-1">Real-time PPE compliance monitoring dashboard.</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Ringkasan</h1>
+                    <p className="text-muted-foreground mt-1">Dashboard pemantauan kepatuhan APD secara real-time.</p>
                 </div>
                 <Badge variant="outline" className="px-4 py-1.5 text-sm bg-primary/5 text-primary">
-                    <TrendingUp className="w-4 h-4 mr-2" /> Live Monitoring Active
+                    <TrendingUp className="w-4 h-4 mr-2" /> Pemantauan Aktif
                 </Badge>
             </div>
 
@@ -41,7 +97,7 @@ export default function Dashboard() {
                         <CardContent>
                             <div className="text-3xl font-bold">{stat.value}</div>
                             <p className="text-xs text-muted-foreground mt-2">
-                                {stat.change}
+                                {stat.subtitle}
                             </p>
                         </CardContent>
                     </Card>
@@ -51,41 +107,83 @@ export default function Dashboard() {
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
                 <Card className="col-span-4 overflow-hidden border">
                     <CardHeader>
-                        <CardTitle>Recent Violations</CardTitle>
+                        <CardTitle>Pelanggaran Terbaru</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-4">
-                            {recentViolations.map((violation) => (
-                                <div key={violation.id} className="flex items-center p-4 border rounded-lg bg-card/50 hover:bg-accent/50 transition-colors">
-                                    <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400">
-                                        <AlertCircle className="w-5 h-5" />
+                        {d.recent_violations.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                                <ShieldCheck className="w-12 h-12 mx-auto mb-3 text-green-500" />
+                                <p className="text-sm">Belum ada pelanggaran tercatat.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {d.recent_violations.map((v) => (
+                                    <div key={v.id} className="flex items-center p-4 border rounded-lg bg-card/50 hover:bg-accent/50 transition-colors">
+                                        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400">
+                                            <AlertCircle className="w-5 h-5" />
+                                        </div>
+                                        <div className="ml-4 space-y-1">
+                                            <p className="text-sm font-medium leading-none">{v.type}</p>
+                                            <p className="text-sm text-muted-foreground">
+                                                {v.camera} • {v.time}
+                                            </p>
+                                        </div>
+                                        <div className="ml-auto flex items-center gap-4">
+                                            <Badge variant={v.severity === 'Critical' || v.severity === 'High' ? 'destructive' : 'secondary'}
+                                                className={v.severity === 'Medium' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20' : ''}>
+                                                {v.severity}
+                                            </Badge>
+                                            <span className="text-xs text-muted-foreground hidden sm:inline-block">
+                                                {v.id}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="ml-4 space-y-1">
-                                        <p className="text-sm font-medium leading-none">{violation.type}</p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {violation.camera} • {violation.time}
-                                        </p>
-                                    </div>
-                                    <div className="ml-auto flex items-center gap-4">
-                                        <Badge variant={violation.severity === 'Critical' ? 'destructive' : 'secondary'}>
-                                            {violation.severity}
-                                        </Badge>
-                                        <span className="text-xs text-muted-foreground hidden sm:inline-block">
-                                            {violation.id}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
                 <Card className="col-span-3">
                     <CardHeader>
-                        <CardTitle>System Status</CardTitle>
+                        <CardTitle className="flex items-center gap-2">
+                            <BarChart3 className="w-5 h-5" /> Pelanggaran (7 Hari)
+                        </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="space-y-8">
+                        <div className="flex items-end gap-2 h-40">
+                            {d.daily_violations.map((item, i) => {
+                                const barHeight = item.count > 0 ? Math.max((item.count / maxDaily) * 120, 8) : 4
+                                return (
+                                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                        <span className="text-xs text-muted-foreground font-medium">{item.count}</span>
+                                        <div
+                                            className={`w-full rounded-t transition-all duration-500 ${item.count > 0 ? 'bg-primary/80' : 'bg-muted-foreground/20'}`}
+                                            style={{ height: `${barHeight}px`, minHeight: '4px' }}
+                                        />
+                                        <span className="text-xs text-muted-foreground">{item.day}</span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+
+                        <div className="mt-6 space-y-3">
+                            <p className="text-sm font-medium text-muted-foreground">Distribusi Tingkat Keparahan</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {Object.entries(d.severity_counts).map(([sev, count]) => (
+                                    <div key={sev} className="flex items-center justify-between text-sm px-3 py-1.5 rounded border">
+                                        <Badge variant={sev === 'Critical' || sev === 'High' ? 'destructive' : 'secondary'}
+                                            className={sev === 'Medium' ? 'bg-yellow-500/10 text-yellow-600' : ''}>
+                                            {sev}
+                                        </Badge>
+                                        <span className="font-medium">{count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="mt-6 space-y-4">
+                            <p className="text-sm font-medium text-muted-foreground">Status Sistem</p>
                             <div className="flex items-center">
                                 <div className="flex items-center justify-center w-9 h-9 rounded-full bg-green-100 text-green-600">
                                     <span className="relative flex w-3 h-3">
@@ -95,17 +193,16 @@ export default function Dashboard() {
                                 </div>
                                 <div className="ml-4 space-y-1">
                                     <p className="text-sm font-medium leading-none">YOLOv11 Engine</p>
-                                    <p className="text-sm text-muted-foreground">Inference running at 45 FPS</p>
+                                    <p className="text-sm text-muted-foreground">Deteksi aktif</p>
                                 </div>
                             </div>
-
                             <div className="flex items-center">
                                 <div className="flex items-center justify-center w-9 h-9 rounded-full bg-blue-100 text-blue-600">
                                     <div className="w-2 h-2 rounded-full bg-blue-600" />
                                 </div>
                                 <div className="ml-4 space-y-1">
-                                    <p className="text-sm font-medium leading-none">Database Connection</p>
-                                    <p className="text-sm text-muted-foreground">Connected • Latency 12ms</p>
+                                    <p className="text-sm font-medium leading-none">Koneksi Database</p>
+                                    <p className="text-sm text-muted-foreground">Terhubung</p>
                                 </div>
                             </div>
                         </div>
