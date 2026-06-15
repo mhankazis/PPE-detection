@@ -8,7 +8,7 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
 
     const fetchProfile = useCallback(async () => {
-        const token = localStorage.getItem('token');
+        const token = sessionStorage.getItem('token');
         if (!token) return null;
         try {
             const res = await fetch('http://localhost:8000/api/auth/me', {
@@ -26,12 +26,29 @@ export function AuthProvider({ children }) {
     }, []);
 
     useEffect(() => {
-        const storedAuth = localStorage.getItem('isAuthenticated');
-        if (storedAuth === 'true') {
-            setIsAuthenticated(true);
-            fetchProfile();
+        const storedAuth = sessionStorage.getItem('isAuthenticated');
+        const storedToken = sessionStorage.getItem('token');
+        if (storedAuth === 'true' && storedToken) {
+            // Validate token — if invalid/expired, force logout
+            fetchProfile().then((profile) => {
+                if (profile) {
+                    setIsAuthenticated(true);
+                } else {
+                    // Token invalid — clear stale auth
+                    sessionStorage.removeItem('isAuthenticated');
+                    sessionStorage.removeItem('token');
+                    sessionStorage.removeItem('role');
+                    setIsAuthenticated(false);
+                }
+                setLoading(false);
+            });
+        } else {
+            // No stored auth — ensure clean state
+            sessionStorage.removeItem('isAuthenticated');
+            sessionStorage.removeItem('token');
+            sessionStorage.removeItem('role');
+            setLoading(false);
         }
-        setLoading(false);
     }, [fetchProfile]);
 
     const login = async (username, password) => {
@@ -51,9 +68,9 @@ export function AuthProvider({ children }) {
             if (response.ok) {
                 const data = await response.json();
                 setIsAuthenticated(true);
-                localStorage.setItem('isAuthenticated', 'true');
-                localStorage.setItem('token', data.access_token);
-                localStorage.setItem('role', data.role);
+                sessionStorage.setItem('isAuthenticated', 'true');
+                sessionStorage.setItem('token', data.access_token);
+                sessionStorage.setItem('role', data.role);
                 await fetchProfile();
                 return { success: true };
             } else {
@@ -69,9 +86,9 @@ export function AuthProvider({ children }) {
     const logout = () => {
         setIsAuthenticated(false);
         setUser(null);
-        localStorage.removeItem('isAuthenticated');
-        localStorage.removeItem('token');
-        localStorage.removeItem('role');
+        sessionStorage.removeItem('isAuthenticated');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('role');
     };
 
     return (

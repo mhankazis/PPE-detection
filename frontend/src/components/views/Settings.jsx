@@ -49,7 +49,7 @@ export default function Settings() {
     useEffect(() => {
         const fetchEzvizConfig = async () => {
             try {
-                const token = localStorage.getItem('token')
+                const token = sessionStorage.getItem('token')
                 const res = await fetch('http://localhost:8000/api/ezviz-config', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
@@ -99,7 +99,7 @@ export default function Settings() {
 
         setIsSaving(true)
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const res = await fetch('http://localhost:8000/api/auth/me', {
                 method: 'PUT',
                 headers: {
@@ -133,7 +133,7 @@ export default function Settings() {
         setEzvizMsg({ type: "", text: "" })
         setIsEzvizSaving(true)
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const payload = {
                 enabled: ezvizData.enabled,
                 email: ezvizData.email,
@@ -196,7 +196,7 @@ export default function Settings() {
         setEzvizMsg({ type: "", text: "" })
         playTestSiren()
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const res = await fetch('http://localhost:8000/api/ezviz-test', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },

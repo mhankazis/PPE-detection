@@ -12,7 +12,7 @@ export default function Dashboard() {
     useEffect(() => {
         const fetchDashboard = async () => {
             try {
-                const token = localStorage.getItem('token')
+                const token = sessionStorage.getItem('token')
                 const res = await fetch(`${API_BASE}/api/dashboard`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })

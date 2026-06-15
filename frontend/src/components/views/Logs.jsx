@@ -62,7 +62,7 @@ export default function Logs() {
     const fetchLogs = async () => {
         setIsLoading(true);
         try {
-            const token = localStorage.getItem('token');
+            const token = sessionStorage.getItem('token');
             const res = await fetch('http://localhost:8000/api/logs', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -79,7 +79,7 @@ export default function Logs() {
 
     const fetchStudents = async () => {
         try {
-            const token = localStorage.getItem('token');
+            const token = sessionStorage.getItem('token');
             const res = await fetch('http://localhost:8000/api/students', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -219,7 +219,7 @@ export default function Logs() {
     const handleDelete = async (id) => {
         if (window.confirm("Apakah Anda yakin ingin menghapus log ini?")) {
             try {
-                const token = localStorage.getItem('token');
+                const token = sessionStorage.getItem('token');
                 await fetch(`http://localhost:8000/api/logs/${id}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -253,7 +253,7 @@ export default function Logs() {
         if (selectedIds.size === 0) return
         if (!window.confirm(`Hapus ${selectedIds.size} log yang dipilih?`)) return
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             await fetch('http://localhost:8000/api/logs/bulk-delete', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -273,7 +273,7 @@ export default function Logs() {
             return
         }
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const params = new URLSearchParams()
             if (bulkSeverity) params.append('severity', bulkSeverity)
             if (bulkStatus) params.append('status', bulkStatus)
@@ -293,7 +293,7 @@ export default function Logs() {
 
     const handleSaveAdd = async () => {
         try {
-            const token = localStorage.getItem('token');
+            const token = sessionStorage.getItem('token');
             const payload = new FormData();
             const violationType = formData.type ? `Kurang: ${formData.type}` : '';
             payload.append('violation_type', violationType);
@@ -329,7 +329,7 @@ export default function Logs() {
 
     const handleSaveEdit = async () => {
         try {
-            const token = localStorage.getItem('token');
+            const token = sessionStorage.getItem('token');
             const payload = new FormData();
             const violationType = formData.type ? `Kurang: ${formData.type}` : '';
             payload.append('violation_type', violationType);

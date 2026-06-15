@@ -36,7 +36,7 @@ export default function Students() {
     const fetchStudents = async () => {
         setIsLoading(true)
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const response = await fetch('http://localhost:8000/api/students', {
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -165,7 +165,7 @@ export default function Students() {
             const file = new File([blob], `capture_${Date.now()}.jpg`, { type: 'image/jpeg' })
 
             // Upload to backend
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const payload = new FormData()
             payload.append('file', file)
 
@@ -198,7 +198,7 @@ export default function Students() {
         setCaptureMessage(null)
 
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const payload = new FormData()
             payload.append('file', file)
 
@@ -242,7 +242,7 @@ export default function Students() {
         if (editingId) {
             const fetchDatasetStatus = async () => {
                 try {
-                    const token = localStorage.getItem('token')
+                    const token = sessionStorage.getItem('token')
                     const res = await fetch(`${API_BASE}/api/students/${editingId}/dataset-status`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     })
@@ -274,7 +274,7 @@ export default function Students() {
         if (!window.confirm("Are you sure you want to delete this student?")) return;
 
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const response = await fetch(`http://localhost:8000/api/students/${id}`, {
                 method: 'DELETE',
                 headers: {
@@ -301,7 +301,7 @@ export default function Students() {
         setDatasetStudentName(student.name)
         setDatasetStudentId(student.id)
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const res = await fetch(`${API_BASE}/api/students/${student.id}/dataset-photos`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             })
@@ -324,7 +324,7 @@ export default function Students() {
         if (!window.confirm("Hapus SEMUA foto dataset wajah murid ini? Tindakan tidak bisa dibatalkan.")) return
 
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const res = await fetch(`${API_BASE}/api/students/${studentId}/dataset-photos`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -349,7 +349,7 @@ export default function Students() {
         setIsSubmitting(true)
 
         try {
-            const token = localStorage.getItem('token')
+            const token = sessionStorage.getItem('token')
             const submitData = new FormData()
             submitData.append('name', formData.name)
             submitData.append('nis', formData.nis)
