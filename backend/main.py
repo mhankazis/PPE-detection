@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import time
 
 app = FastAPI(title="PPE Detection API (YOLOv11 Backend)")
@@ -7,7 +8,7 @@ app = FastAPI(title="PPE Detection API (YOLOv11 Backend)")
 # Database and Auth setup
 import models
 from database import engine
-from auth import router as auth_router
+from auth import router as auth_router, get_current_user
 from students import router as students_router
 from logs import router as logs_router
 from detect_router import router as detect_router
@@ -19,6 +20,51 @@ app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(logs_router)
 app.include_router(detect_router)
+
+
+# EZVIZ Alarm Configuration API
+class EzvizConfigRequest(BaseModel):
+    enabled: bool = None
+    email: str = None
+    password: str = None
+    device_serial: str = None
+    siren_duration: int = None
+
+@app.get("/api/ezviz-config")
+def get_ezviz_config(current_user: models.User = Depends(get_current_user)):
+    from ezviz_alarm import get_config
+    return get_config()
+
+@app.put("/api/ezviz-config")
+def update_ezviz_config(body: EzvizConfigRequest, current_user: models.User = Depends(get_current_user)):
+    from ezviz_alarm import update_config
+    update_config(
+        enabled=body.enabled,
+        email=body.email,
+        password=body.password,
+        device_serial=body.device_serial,
+        siren_duration=body.siren_duration,
+    )
+    return {"message": "Konfigurasi EZVIZ berhasil diperbarui"}
+
+@app.post("/api/ezviz-test")
+def test_ezviz_siren(current_user: models.User = Depends(get_current_user)):
+    from ezviz_alarm import trigger_siren
+    trigger_siren()
+    return {"message": "Alarm test dikirim — browser akan membunyikan siren"}
+
+@app.get("/api/alarm/status")
+def alarm_status():
+    """Poll endpoint for frontend to check if alarm should sound."""
+    from ezviz_alarm import get_alarm_status
+    return get_alarm_status()
+
+@app.post("/api/alarm/acknowledge")
+def alarm_acknowledge(current_user: models.User = Depends(get_current_user)):
+    """Stop alarm sound (operator acknowledged)."""
+    from ezviz_alarm import acknowledge_alarm
+    acknowledge_alarm()
+    return {"message": "Alarm dihentikan"}
 
 
 @app.on_event("startup")
@@ -50,13 +96,33 @@ def startup_preload():
 
 @app.get("/api/face-status")
 def face_recognition_status():
-    """Return face recognition cache status."""
+    """Return face recognition model + cache status."""
     try:
         from face_recognition import get_recognizer
         recognizer = get_recognizer()
-        return {"enabled": True, "enrolled_students": recognizer.get_cache_size()}
-    except Exception:
-        return {"enabled": False, "enrolled_students": 0}
+        return {
+            "enabled": recognizer.app is not None,
+            "enrolled_students": recognizer.get_cache_size(),
+            "model_loaded": recognizer.app is not None,
+        }
+    except Exception as e:
+        return {"enabled": False, "enrolled_students": 0, "model_loaded": False, "error": str(e)}
+
+
+@app.post("/api/face-reload")
+def face_recognition_reload(current_user: models.User = Depends(get_current_user)):
+    """Reload InsightFace model without restarting server. Admin/operator only."""
+    try:
+        from face_recognition import get_recognizer
+        recognizer = get_recognizer()
+        ok = recognizer.reload_model()
+        return {
+            "success": ok,
+            "model_loaded": recognizer.app is not None,
+            "enrolled_students": recognizer.get_cache_size(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/dashboard")
 def dashboard_stats():

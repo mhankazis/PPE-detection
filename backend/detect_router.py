@@ -465,6 +465,13 @@ def _generate_detection_frames():
 
                 student_label = student_names.get(student_id, f"ID:{student_id}") if student_id else "Unknown"
                 print(f"[LiveDetect] Violation logged: {student_label} — {violation_type} ({severity})")
+
+                # Trigger EZVIZ siren if enabled
+                try:
+                    from ezviz_alarm import trigger_siren
+                    trigger_siren()
+                except Exception as e:
+                    print(f"[LiveDetect] EZVIZ siren trigger skipped: {e}")
             finally:
                 db.close()
         except Exception as e:
@@ -496,39 +503,38 @@ def _generate_detection_frames():
 
                     annotated_frame = detector._draw_annotations(raw_frame.copy(), detections, compliance, lightweight=True)
 
-                    # Face recognition: identify non-compliant persons
+                    # Face recognition: identify ALL detected persons (compliant or not)
                     if face_recognizer is not None:
                         for comp in compliance:
-                            if not comp["is_compliant"]:
-                                try:
-                                    student_id = face_recognizer.identify(raw_frame, comp["person_bbox"])
-                                    if student_id is None:
-                                        # Face not recognized — expand bbox to include more context
-                                        x1, y1, x2, y2 = comp["person_bbox"]
-                                        h, w = raw_frame.shape[:2]
-                                        bw, bh = x2 - x1, y2 - y1
-                                        ex1 = max(0, int(x1 - bw * 0.2))
-                                        ey1 = max(0, int(y1 - bh * 0.2))
-                                        ex2 = min(w, int(x2 + bw * 0.2))
-                                        ey2 = min(h, int(y2 + bh * 0.2))
-                                        student_id = face_recognizer.identify(raw_frame, [ex1, ey1, ex2, ey2])
-                                    if student_id is not None:
-                                        comp["identified_student_id"] = student_id
-                                        # Draw student name label above person box
-                                        student_name = student_names.get(student_id, f"ID:{student_id}")
-                                        px1, py1, px2, py2 = comp["person_bbox"]
-                                        frame_w = annotated_frame.shape[1]
-                                        sf = max(frame_w / 640, 1.0)
-                                        name_scale = 0.7 * sf
-                                        name_thick = max(2, int(2 * sf))
-                                        pad = int(6 * sf)
-                                        (text_w, text_h), _ = cv2.getTextSize(student_name, cv2.FONT_HERSHEY_SIMPLEX, name_scale, name_thick)
-                                        cv2.rectangle(annotated_frame, (px1, py1 - text_h - pad * 3), (px1 + text_w + pad * 2, py1 - pad), (0, 0, 0), -1)
-                                        cv2.putText(annotated_frame, student_name,
-                                                    (px1 + pad, py1 - pad * 2), cv2.FONT_HERSHEY_SIMPLEX,
-                                                    name_scale, (0, 255, 255), name_thick, cv2.LINE_AA)
-                                except Exception as e:
-                                    print(f"[LiveDetect] Face recognition error: {e}")
+                            try:
+                                student_id = face_recognizer.identify(raw_frame, comp["person_bbox"])
+                                if student_id is None:
+                                    # Face not recognized — expand bbox to include more context
+                                    x1, y1, x2, y2 = comp["person_bbox"]
+                                    h, w = raw_frame.shape[:2]
+                                    bw, bh = x2 - x1, y2 - y1
+                                    ex1 = max(0, int(x1 - bw * 0.2))
+                                    ey1 = max(0, int(y1 - bh * 0.2))
+                                    ex2 = min(w, int(x2 + bw * 0.2))
+                                    ey2 = min(h, int(y2 + bh * 0.2))
+                                    student_id = face_recognizer.identify(raw_frame, [ex1, ey1, ex2, ey2])
+                                if student_id is not None:
+                                    comp["identified_student_id"] = student_id
+                                    # Draw student name label above person box
+                                    student_name = student_names.get(student_id, f"ID:{student_id}")
+                                    px1, py1, px2, py2 = comp["person_bbox"]
+                                    frame_w = annotated_frame.shape[1]
+                                    sf = max(frame_w / 640, 1.0)
+                                    name_scale = 0.7 * sf
+                                    name_thick = max(2, int(2 * sf))
+                                    pad = int(6 * sf)
+                                    (text_w, text_h), _ = cv2.getTextSize(student_name, cv2.FONT_HERSHEY_SIMPLEX, name_scale, name_thick)
+                                    cv2.rectangle(annotated_frame, (px1, py1 - text_h - pad * 3), (px1 + text_w + pad * 2, py1 - pad), (0, 0, 0), -1)
+                                    cv2.putText(annotated_frame, student_name,
+                                                (px1 + pad, py1 - pad * 2), cv2.FONT_HERSHEY_SIMPLEX,
+                                                name_scale, (0, 255, 255), name_thick, cv2.LINE_AA)
+                            except Exception as e:
+                                print(f"[LiveDetect] Face recognition error: {e}")
 
                     # Auto-log violations for non-compliant persons (with debounce)
                     for comp in compliance:

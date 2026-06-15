@@ -27,9 +27,7 @@ export function Sidebar() {
             {/* Brand */}
             <div className="flex items-center justify-between p-6 border-b">
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center p-2 rounded-lg bg-primary/10 text-primary">
-                        <ShieldAlert className="w-6 h-6" />
-                    </div>
+                    <img src="/logo.svg" alt="Deteksi APD" className="h-9 w-9 shrink-0" />
                     {!isCollapsed && (
                         <span className="text-xl font-bold tracking-tight">Deteksi APD</span>
                     )}

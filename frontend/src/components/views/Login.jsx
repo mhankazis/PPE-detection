@@ -45,10 +45,8 @@ export default function Login() {
 
             <div className="z-10 w-full max-w-md space-y-8 rounded-2xl border bg-card/80 backdrop-blur-xl p-8 shadow-2xl">
                 <div className="flex flex-col items-center space-y-2">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-2 shadow-inner ring-1 ring-primary/20">
-                        <ShieldAlert className="h-8 w-8" />
-                    </div>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground">PPE Detect</h2>
+                    <img src="/logo.svg" alt="Deteksi APD" className="h-16 w-16 mb-2 drop-shadow-lg" />
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground">Deteksi APD</h2>
                     <p className="text-sm text-muted-foreground">Masuk untuk mengakses dashboard</p>
                 </div>
 

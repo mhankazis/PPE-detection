@@ -1,8 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
-import { useState, useEffect } from "react"
-import { Shield, User, Key, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { Shield, User, Key, CheckCircle, AlertCircle, Loader2, Bell, Volume2 } from "lucide-react"
 
 export default function Settings() {
     const { user, fetchProfile } = useAuth()
@@ -22,6 +23,18 @@ export default function Settings() {
     const [isSaving, setIsSaving] = useState(false)
     const [message, setMessage] = useState({ type: "", text: "" })
 
+    // EZVIZ config state
+    const [ezvizData, setEzvizData] = useState({
+        enabled: false,
+        email: "",
+        password: "",
+        device_serial: "",
+        siren_duration: 5,
+        password_set: false,
+    })
+    const [isEzvizSaving, setIsEzvizSaving] = useState(false)
+    const [ezvizMsg, setEzvizMsg] = useState({ type: "", text: "" })
+
     useEffect(() => {
         if (user) {
             setProfileData({
@@ -31,6 +44,33 @@ export default function Settings() {
             })
         }
     }, [user])
+
+    // Fetch EZVIZ config
+    useEffect(() => {
+        const fetchEzvizConfig = async () => {
+            try {
+                const token = localStorage.getItem('token')
+                const res = await fetch('http://localhost:8000/api/ezviz-config', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    setEzvizData(prev => ({
+                        ...prev,
+                        enabled: data.enabled || false,
+                        email: data.email || "",
+                        device_serial: data.device_serial || "",
+                        siren_duration: data.siren_duration || 5,
+                        password_set: data.password_set || false,
+                        password: "",
+                    }))
+                }
+            } catch (e) {
+                console.error("Failed to fetch EZVIZ config", e)
+            }
+        }
+        fetchEzvizConfig()
+    }, [])
 
     const handlePasswordChange = (e) => {
         const { name, value } = e.target
@@ -87,6 +127,89 @@ export default function Settings() {
         if (role === "admin") return "Administrator"
         if (role === "operator") return "Operator"
         return role
+    }
+
+    const handleSaveEzviz = async () => {
+        setEzvizMsg({ type: "", text: "" })
+        setIsEzvizSaving(true)
+        try {
+            const token = localStorage.getItem('token')
+            const payload = {
+                enabled: ezvizData.enabled,
+                email: ezvizData.email,
+                device_serial: ezvizData.device_serial,
+                siren_duration: ezvizData.siren_duration,
+            }
+            if (ezvizData.password) {
+                payload.password = ezvizData.password
+            }
+            const res = await fetch('http://localhost:8000/api/ezviz-config', {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            })
+            if (res.ok) {
+                setEzvizMsg({ type: "success", text: "Konfigurasi EZVIZ berhasil disimpan." })
+                setEzvizData(prev => ({ ...prev, password: "", password_set: prev.password_set || !!ezvizData.password }))
+            } else {
+                const err = await res.json()
+                setEzvizMsg({ type: "error", text: err.detail || "Gagal menyimpan konfigurasi." })
+            }
+        } catch (err) {
+            setEzvizMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        } finally {
+            setIsEzvizSaving(false)
+        }
+    }
+
+    const testAudioRef = useRef(null)
+
+    const playTestSiren = () => {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)()
+            if (ctx.state === "suspended") ctx.resume()
+            const osc = ctx.createOscillator()
+            const gain = ctx.createGain()
+            const lfo = ctx.createOscillator()
+            const lfoGain = ctx.createGain()
+            osc.type = "sawtooth"
+            osc.frequency.value = 600
+            gain.gain.value = 0.3
+            lfo.frequency.value = 4
+            lfoGain.gain.value = 300
+            lfo.connect(lfoGain)
+            lfoGain.connect(osc.frequency)
+            osc.connect(gain)
+            gain.connect(ctx.destination)
+            osc.start()
+            lfo.start()
+            setTimeout(() => { osc.stop(); lfo.stop(); ctx.close() }, 3000)
+        } catch (e) {
+            console.error("Test siren error:", e)
+        }
+    }
+
+    const handleTestSiren = async () => {
+        setEzvizMsg({ type: "", text: "" })
+        playTestSiren()
+        try {
+            const token = localStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/ezviz-test', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            })
+            if (res.ok) {
+                setEzvizMsg({ type: "success", text: "Alarm test berbunyi di browser. (Kamera H6C tidak punya siren hardware)" })
+            } else {
+                const err = await res.json()
+                setEzvizMsg({ type: "error", text: err.detail || "Gagal mengirim test alarm." })
+            }
+        } catch (err) {
+            setEzvizMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        }
     }
 
     const formatDate = (isoStr) => {
@@ -229,6 +352,103 @@ export default function Settings() {
                                         Menyimpan...
                                     </>
                                 ) : "Simpan Password"}
+                            </Button>
+                        </CardFooter>
+                    </Card>
+
+                    {/* EZVIZ Siren Config Card */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Bell className="w-5 h-5" />
+                                        Siren EZVIZ
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Konfigurasi siren kamera EZVIZ saat pelanggaran terdeteksi.
+                                    </CardDescription>
+                                </div>
+                                <Badge variant={ezvizData.enabled ? "default" : "secondary"} className={ezvizData.enabled ? "bg-green-500 hover:bg-green-600" : ""}>
+                                    {ezvizData.enabled ? "Aktif" : "Nonaktif"}
+                                </Badge>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                                <div className="flex items-center gap-2">
+                                    <Volume2 className="w-4 h-4 text-muted-foreground" />
+                                    <span className="text-sm font-medium">Aktifkan Siren</span>
+                                </div>
+                                <button
+                                    onClick={() => setEzvizData(prev => ({ ...prev, enabled: !prev.enabled }))}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${ezvizData.enabled ? 'bg-primary' : 'bg-muted'}`}
+                                >
+                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${ezvizData.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium leading-none">Email Akun EZVIZ</label>
+                                <input
+                                    type="email"
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    placeholder="email@contoh.com"
+                                    value={ezvizData.email}
+                                    onChange={(e) => setEzvizData(prev => ({ ...prev, email: e.target.value }))}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium leading-none">Password EZVIZ</label>
+                                <input
+                                    type="password"
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    placeholder={ezvizData.password_set ? "•••••••• (sudah disimpan)" : "Masukkan password EZVIZ"}
+                                    value={ezvizData.password}
+                                    onChange={(e) => setEzvizData(prev => ({ ...prev, password: e.target.value }))}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium leading-none">Serial Number Kamera</label>
+                                <input
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    placeholder="Contoh: C6CN01234567890"
+                                    value={ezvizData.device_serial}
+                                    onChange={(e) => setEzvizData(prev => ({ ...prev, device_serial: e.target.value }))}
+                                />
+                                <p className="text-[0.8rem] text-muted-foreground">Ditemukan di aplikasi EZVIZ → Pengaturan Perangkat → Info Perangkat.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium leading-none">Durasi Siren (detik)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={30}
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    value={ezvizData.siren_duration}
+                                    onChange={(e) => setEzvizData(prev => ({ ...prev, siren_duration: parseInt(e.target.value) || 5 }))}
+                                />
+                            </div>
+
+                            {ezvizMsg.text && (
+                                <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${ezvizMsg.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+                                    {ezvizMsg.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                    {ezvizMsg.text}
+                                </div>
+                            )}
+                        </CardContent>
+                        <CardFooter className="bg-muted/30 pt-4 flex justify-between">
+                            <Button variant="outline" onClick={handleTestSiren} disabled={isEzvizSaving}>
+                                <Volume2 className="w-4 h-4 mr-2" />
+                                Test Alarm
+                            </Button>
+                            <Button onClick={handleSaveEzviz} disabled={isEzvizSaving} className="min-w-[140px]">
+                                {isEzvizSaving ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                        Menyimpan...
+                                    </>
+                                ) : "Simpan Konfigurasi"}
                             </Button>
                         </CardFooter>
                     </Card>

@@ -1,0 +1,35 @@
+# PPE Detection — backend dependencies
+# Install: pip install -r backend/requirements.txt
+
+# Web framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Database
+sqlite-utils
+
+# Image / video processing
+opencv-python
+numpy
+pillow
+
+# Detection
+ultralytics>=8.4.0
+# Preferred inference backend — lighter & faster startup than PyTorch.
+# CPU-only build; swap to onnxruntime-gpu for CUDA acceleration.
+onnxruntime>=1.18.0
+
+# PyTorch fallback backend (only used if ONNX model file is missing).
+# CPU build keeps install small. For GPU, install torch with CUDA wheels.
+torch --index-url https://download.pytorch.org/whl/cpu
+
+# Face recognition — InsightFace (SCRFD + ArcFace)
+insightface>=1.0.0
+onnxruntime>=1.18.0
+
+# EZVIZ camera alarm (direct siren API)
+pyezviz>=0.2.2
+
+# Optional fallback face recognition library
+# face-recognition

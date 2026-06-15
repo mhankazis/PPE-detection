@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2, ShieldAlert, Eye, EyeOff, Scan, Plug, Unplug } from "lucide-react"
+import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2, ShieldAlert, Eye, EyeOff, Scan, Plug, Unplug, Bell, BellOff } from "lucide-react"
+import { useAlarmSound } from "../../hooks/useAlarmSound"
 
 const API_BASE = "http://localhost:8000"
 
@@ -12,6 +13,7 @@ export default function LiveFeed() {
     const [isConnected, setIsConnected] = useState(false)
     const imgRef = useRef(null)
     const loadingTimerRef = useRef(null)
+    const { isPlaying, acknowledge } = useAlarmSound(API_BASE)
 
     // Cleanup the stream when navigating away to prevent hanging requests
     useEffect(() => {
@@ -81,7 +83,24 @@ export default function LiveFeed() {
         : `${API_BASE}/api/video_feed`
 
     return (
-        <div className="p-8 h-full flex flex-col animate-in fade-in duration-500">
+        <div className="p-8 h-full flex flex-col animate-in fade-in duration-500 relative">
+            {/* Alarm Popup Overlay — fixed top, doesn't shift layout */}
+            {isPlaying && (
+                <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 p-4 rounded-xl bg-red-600 shadow-2xl shadow-red-600/40 flex items-center gap-4 animate-in slide-in-from-top duration-300">
+                    <Bell className="w-6 h-6 text-white animate-bounce flex-shrink-0" />
+                    <div className="flex-shrink-0">
+                        <p className="font-bold text-white text-lg leading-tight">PELANGGARAN APD TERDETEKSI!</p>
+                        <p className="text-sm text-white/80">Alarm berbunyi — periksa area kerja</p>
+                    </div>
+                    <button
+                        onClick={acknowledge}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-red-600 font-medium hover:bg-red-50 transition-colors flex-shrink-0"
+                    >
+                        <BellOff className="w-4 h-4" />
+                        Hentikan
+                    </button>
+                </div>
+            )}
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Live CCTV Feed</h1>

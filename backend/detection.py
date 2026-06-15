@@ -13,8 +13,15 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-# Path to the trained YOLO model
-MODEL_PATH = Path(__file__).parent / "yolo_models" / "best.pt"
+# Model directory — prefer ONNX (lighter, faster startup), fallback to PyTorch .pt
+_MODELS_DIR = Path(__file__).parent / "yolo_models"
+ONNX_MODEL_PATH = _MODELS_DIR / "best.onnx"
+PT_MODEL_PATH = _MODELS_DIR / "best.pt"
+
+# Active model path (resolved at load time)
+MODEL_PATH = ONNX_MODEL_PATH if ONNX_MODEL_PATH.exists() else PT_MODEL_PATH
+# Backend tag for logging
+MODEL_BACKEND = "onnx" if ONNX_MODEL_PATH.exists() else "pt"
 
 # Detection confidence threshold
 CONFIDENCE_THRESHOLD = 0.5
@@ -58,22 +65,60 @@ class PPEDetector:
         self._load_model()
 
     def _load_model(self):
-        """Load the YOLO model from disk and warm it up."""
+        """Load the YOLO model from disk and warm it up.
+
+        Backend priority: ONNX Runtime > PyTorch (.pt)
+        - ONNX: lighter dependency, faster startup, optimized CPU/GPU execution
+        - .pt:  fallback if ONNX file missing or fails to load
+        """
         try:
             from ultralytics import YOLO
-            import torch
         except ImportError:
             print(f"[PPE Detector] ERROR: ultralytics not installed. Run: pip install ultralytics")
             self.model = None
             return
-        if not MODEL_PATH.exists():
-            print(f"[PPE Detector] ERROR: Model file not found: {MODEL_PATH}")
+
+        # Try ONNX backend first
+        if MODEL_BACKEND == "onnx" and ONNX_MODEL_PATH.exists():
+            try:
+                import onnxruntime as ort
+                # Pick best available execution provider
+                available = ort.get_available_providers()
+                if "CUDAExecutionProvider" in available:
+                    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                    self.device = "cuda"
+                else:
+                    providers = ["CPUExecutionProvider"]
+                    self.device = "cpu"
+                print(f"[PPE Detector] Loading ONNX model from {ONNX_MODEL_PATH}...")
+                print(f"[PPE Detector] ONNX Runtime providers: {providers}")
+                # Ultralytics YOLO auto-detects ONNX backend from file extension.
+                # Pass providers via session options through the task argument.
+                self.model = YOLO(str(ONNX_MODEL_PATH), task="detect")
+                self.model.predict(
+                    np.zeros((self.INFERENCE_SIZE, self.INFERENCE_SIZE, 3), dtype=np.uint8),
+                    conf=self.confidence, iou=self.NMS_IOU_THRESHOLD,
+                    imgsz=self.INFERENCE_SIZE, verbose=False, device=self.device,
+                )
+                print(f"[PPE Detector] ONNX model loaded & warmed up. Classes: {self.model.names}")
+                return
+            except Exception as e:
+                print(f"[PPE Detector] WARNING: ONNX load failed ({e}). Falling back to .pt")
+
+        # Fallback: PyTorch backend
+        if not PT_MODEL_PATH.exists():
+            print(f"[PPE Detector] ERROR: No model file found. Tried ONNX and .pt")
             self.model = None
             return
-        print(f"[PPE Detector] Loading model from {MODEL_PATH}...")
-        self.model = YOLO(str(MODEL_PATH))
+        try:
+            import torch
+        except ImportError:
+            print(f"[PPE Detector] ERROR: torch not installed for .pt fallback")
+            self.model = None
+            return
 
-        # Use half-precision (FP16) if CUDA is available for ~2x speedup
+        print(f"[PPE Detector] Loading PyTorch model from {PT_MODEL_PATH}...")
+        self.model = YOLO(str(PT_MODEL_PATH))
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if self.device == 'cuda':
             self.model.model.half()
@@ -81,7 +126,7 @@ class PPEDetector:
         else:
             print(f"[PPE Detector] Running on CPU — using FP32")
 
-        # Warmup: run one dummy inference to JIT-compile everything
+        # Warmup
         print(f"[PPE Detector] Warming up model...")
         dummy = np.zeros((self.INFERENCE_SIZE, self.INFERENCE_SIZE, 3), dtype=np.uint8)
         self.model(dummy, conf=self.confidence, iou=self.NMS_IOU_THRESHOLD,

@@ -192,10 +192,13 @@ async def capture_dataset_photo(
         from face_recognition import get_recognizer
         recognizer = get_recognizer()
         if recognizer.app is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Face recognition model not loaded. Pastikan insightface terinstall dan model buffalo_sc sudah didownload."
-            )
+            # Auto-retry: reload model once if it failed at startup
+            print("[Students] Face model not loaded — attempting reload...")
+            if not recognizer.reload_model():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Face recognition model not loaded. Pastikan insightface terinstall dan model buffalo_sc sudah didownload. Cek log server untuk detail."
+                )
         success = recognizer.enroll_student_from_frame(student_id, frame, db=db)
     except HTTPException:
         raise
@@ -241,6 +244,100 @@ def get_dataset_status(
     }
 
 
+@router.get("/{student_id}/dataset-photos")
+def get_dataset_photos(
+    student_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Return the list of InsightFace dataset photo URLs for a student.
+    Photos are stored on disk (paths recorded in face_embeddings.photo_path)
+    and served via the /.uploads static mount.
+    """
+    student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    rows = db.query(models.FaceEmbedding).filter(
+        models.FaceEmbedding.student_id == student_id
+    ).order_by(models.FaceEmbedding.photo_index.asc()).all()
+
+    photos = []
+    for row in rows:
+        if row.photo_path:
+            # Normalize Windows backslashes for URL
+            url_path = row.photo_path.replace("\\", "/")
+            photos.append({
+                "id": row.id,
+                "photo_index": row.photo_index,
+                "url": f"/{url_path}",
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            })
+
+    return {
+        "student_id": student_id,
+        "student_name": student.name,
+        "total_photos": len(photos),
+        "photos": photos,
+    }
+
+
+@router.delete("/{student_id}/dataset-photos")
+def clear_dataset_photos(
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Delete ALL InsightFace dataset photos and embeddings for a student.
+    Removes rows from face_embeddings, deletes photo files on disk,
+    and clears the in-memory embedding cache.
+    Use when user wants to retake the face dataset from scratch.
+    """
+    student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Count before deletion for response
+    count_before = db.query(models.FaceEmbedding).filter(
+        models.FaceEmbedding.student_id == student_id
+    ).count()
+
+    # Collect photo paths before DB rows are deleted
+    rows = db.query(models.FaceEmbedding).filter(
+        models.FaceEmbedding.student_id == student_id
+    ).all()
+    deleted_files = 0
+    for row in rows:
+        if row.photo_path:
+            try:
+                if os.path.exists(row.photo_path):
+                    os.remove(row.photo_path)
+                    deleted_files += 1
+            except Exception:
+                pass
+
+    # Delete DB rows
+    db.query(models.FaceEmbedding).filter(
+        models.FaceEmbedding.student_id == student_id
+    ).delete()
+    db.commit()
+
+    # Clear in-memory cache
+    try:
+        from face_recognition import get_recognizer
+        get_recognizer().remove_student(student_id)
+    except Exception as e:
+        print(f"[Students] Cache clear failed for {student_id}: {e}")
+
+    return {
+        "message": "Dataset cleared",
+        "student_id": student_id,
+        "deleted_embeddings": count_before,
+        "deleted_files": deleted_files
+    }
+
+
 @router.post("/{student_id}/upload-dataset")
 async def upload_dataset_photo(
     student_id: int,
@@ -272,7 +369,16 @@ async def upload_dataset_photo(
     try:
         from face_recognition import get_recognizer
         recognizer = get_recognizer()
+        if recognizer.app is None:
+            print("[Students] Face model not loaded — attempting reload...")
+            if not recognizer.reload_model():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Face recognition model not loaded. Pastikan insightface terinstall dan model buffalo_sc sudah didownload."
+                )
         success = recognizer.enroll_student_from_frame(student_id, frame, db=db)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Face recognition failed: {str(e)}")
 

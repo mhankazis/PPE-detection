@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Users, Upload, Image as ImageIcon, X, Save, Camera, Plus, List as ListIcon, Trash2, User, Pencil, Video, CheckCircle, AlertCircle } from "lucide-react"
+import { Users, Upload, Image as ImageIcon, X, Save, Camera, Plus, List as ListIcon, Trash2, User, Pencil, Video, CheckCircle, AlertCircle, Eye, ImageOff } from "lucide-react"
 
 const API_BASE = "http://localhost:8000"
 
@@ -25,6 +25,13 @@ export default function Students() {
     const videoRef = useRef(null)
     const streamRef = useRef(null)
     const MAX_PHOTOS = 10
+
+    // Dataset gallery modal states
+    const [showDatasetModal, setShowDatasetModal] = useState(false)
+    const [datasetPhotos, setDatasetPhotos] = useState([])
+    const [datasetStudentName, setDatasetStudentName] = useState('')
+    const [datasetStudentId, setDatasetStudentId] = useState(null)
+    const [isLoadingDataset, setIsLoadingDataset] = useState(false)
 
     const fetchStudents = async () => {
         setIsLoading(true)
@@ -265,7 +272,7 @@ export default function Students() {
 
     const handleDelete = async (id) => {
         if (!window.confirm("Are you sure you want to delete this student?")) return;
-        
+
         try {
             const token = localStorage.getItem('token')
             const response = await fetch(`http://localhost:8000/api/students/${id}`, {
@@ -287,10 +294,60 @@ export default function Students() {
         }
     }
 
+    const handleViewDataset = async (student) => {
+        setShowDatasetModal(true)
+        setIsLoadingDataset(true)
+        setDatasetPhotos([])
+        setDatasetStudentName(student.name)
+        setDatasetStudentId(student.id)
+        try {
+            const token = localStorage.getItem('token')
+            const res = await fetch(`${API_BASE}/api/students/${student.id}/dataset-photos`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                setDatasetPhotos(data.photos || [])
+                setDatasetStudentName(data.student_name || student.name)
+            } else {
+                console.error("Failed to fetch dataset photos")
+            }
+        } catch (err) {
+            console.error("Dataset fetch error", err)
+        } finally {
+            setIsLoadingDataset(false)
+        }
+    }
+
+    const handleClearDataset = async (studentId) => {
+        if (!studentId) return
+        if (!window.confirm("Hapus SEMUA foto dataset wajah murid ini? Tindakan tidak bisa dibatalkan.")) return
+
+        try {
+            const token = localStorage.getItem('token')
+            const res = await fetch(`${API_BASE}/api/students/${studentId}/dataset-photos`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                setDatasetPhotos([])
+                setCapturedPhotos(0)
+                alert(`Dataset dihapus: ${data.deleted_embeddings} embedding, ${data.deleted_files} file dihapus.`)
+            } else {
+                const err = await res.json().catch(() => ({}))
+                alert(err.detail || 'Gagal menghapus dataset')
+            }
+        } catch (err) {
+            console.error("Clear dataset error", err)
+            alert('Gagal menghubungi server.')
+        }
+    }
+
     const handleSubmit = async (e) => {
         e.preventDefault()
         setIsSubmitting(true)
-        
+
         try {
             const token = localStorage.getItem('token')
             const submitData = new FormData()
@@ -303,10 +360,10 @@ export default function Students() {
                 submitData.append('remove_photo', 'true')
             }
 
-            const url = editingId 
+            const url = editingId
                 ? `http://localhost:8000/api/students/${editingId}`
                 : 'http://localhost:8000/api/students'
-                
+
             const method = editingId ? 'PUT' : 'POST'
 
             const response = await fetch(url, {
@@ -415,6 +472,13 @@ export default function Students() {
                                             <td className="px-6 py-4 text-muted-foreground">{new Date(student.created_at).toLocaleDateString('id-ID')}</td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
+                                                    <button
+                                                        onClick={() => handleViewDataset(student)}
+                                                        className="p-2 text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                                        title="Lihat Dataset Wajah"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </button>
                                                     <button onClick={() => handleEdit(student)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors">
                                                         <Pencil className="w-4 h-4" />
                                                     </button>
@@ -580,9 +644,8 @@ export default function Students() {
                                         <Video className="w-5 h-5 text-primary" />
                                         Dataset Wajah
                                     </h2>
-                                    <span className={`text-sm font-medium px-3 py-1 rounded-full ${
-                                        capturedPhotos >= 5 ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'
-                                    }`}>
+                                    <span className={`text-sm font-medium px-3 py-1 rounded-full ${capturedPhotos >= 5 ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'
+                                        }`}>
                                         {capturedPhotos}/{MAX_PHOTOS} foto
                                     </span>
                                 </div>
@@ -611,11 +674,10 @@ export default function Students() {
 
                                 {/* Capture Message */}
                                 {captureMessage && (
-                                    <div className={`flex items-center gap-2 p-3 mb-4 rounded-lg text-sm ${
-                                        captureMessage.type === 'success'
-                                            ? 'bg-green-500/10 text-green-600 border border-green-500/20'
-                                            : 'bg-red-500/10 text-red-600 border border-red-500/20'
-                                    }`}>
+                                    <div className={`flex items-center gap-2 p-3 mb-4 rounded-lg text-sm ${captureMessage.type === 'success'
+                                        ? 'bg-green-500/10 text-green-600 border border-green-500/20'
+                                        : 'bg-red-500/10 text-red-600 border border-red-500/20'
+                                        }`}>
                                         {captureMessage.type === 'success'
                                             ? <CheckCircle className="w-4 h-4 shrink-0" />
                                             : <AlertCircle className="w-4 h-4 shrink-0" />
@@ -629,11 +691,10 @@ export default function Students() {
                                     <button
                                         type="button"
                                         onClick={() => setShowCameraCapture(!showCameraCapture)}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                            showCameraCapture
-                                                ? 'bg-red-500/10 text-red-600 border border-red-500/30 hover:bg-red-500/20'
-                                                : 'bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20'
-                                        }`}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${showCameraCapture
+                                            ? 'bg-red-500/10 text-red-600 border border-red-500/30 hover:bg-red-500/20'
+                                            : 'bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20'
+                                            }`}
                                     >
                                         <Video className="w-4 h-4" />
                                         {showCameraCapture ? 'Tutup Kamera' : 'Buka Kamera'}
@@ -651,11 +712,10 @@ export default function Students() {
                                         </button>
                                     )}
 
-                                    <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${
-                                        capturedPhotos >= MAX_PHOTOS
-                                            ? 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
-                                            : 'bg-blue-500/10 text-blue-600 border border-blue-500/30 hover:bg-blue-500/20'
-                                    }`}>
+                                    <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${capturedPhotos >= MAX_PHOTOS
+                                        ? 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+                                        : 'bg-blue-500/10 text-blue-600 border border-blue-500/30 hover:bg-blue-500/20'
+                                        }`}>
                                         <Upload className="w-4 h-4" />
                                         Upload Foto
                                         <input
@@ -667,6 +727,18 @@ export default function Students() {
                                             disabled={capturedPhotos >= MAX_PHOTOS}
                                         />
                                     </label>
+
+                                    {capturedPhotos > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleClearDataset(editingId)}
+                                            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-destructive border border-destructive/30 hover:bg-destructive/10 transition-all"
+                                            title="Hapus semua foto dataset untuk retake"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                            Hapus Dataset
+                                        </button>
+                                    )}
                                 </div>
 
                                 {/* Progress indicator */}
@@ -678,9 +750,8 @@ export default function Students() {
                                         </div>
                                         <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                                             <div
-                                                className={`h-full rounded-full transition-all duration-300 ${
-                                                    capturedPhotos >= 5 ? 'bg-green-500' : 'bg-amber-500'
-                                                }`}
+                                                className={`h-full rounded-full transition-all duration-300 ${capturedPhotos >= 5 ? 'bg-green-500' : 'bg-amber-500'
+                                                    }`}
                                                 style={{ width: `${Math.min((capturedPhotos / MAX_PHOTOS) * 100, 100)}%` }}
                                             />
                                         </div>
@@ -688,6 +759,99 @@ export default function Students() {
                                 )}
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* Dataset Photos Modal */}
+            {showDatasetModal && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+                    onClick={() => setShowDatasetModal(false)}
+                >
+                    <div
+                        className="relative w-full max-w-3xl max-h-[85vh] overflow-hidden bg-card rounded-2xl shadow-2xl flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-5 border-b">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg">
+                                    <ImageIcon className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-lg">Dataset Wajah — {datasetStudentName}</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        {isLoadingDataset ? 'Memuat...' : `${datasetPhotos.length} foto InsightFace`}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                {datasetPhotos.length > 0 && (
+                                    <button
+                                        onClick={() => handleClearDataset(datasetStudentId)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                                        title="Hapus semua foto dataset"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                        Hapus Semua
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setShowDatasetModal(false)}
+                                    className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
+                                    title="Tutup"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body — Gallery */}
+                        <div className="flex-1 overflow-y-auto p-5">
+                            {isLoadingDataset ? (
+                                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-3" />
+                                    <p className="text-sm">Memuat dataset...</p>
+                                </div>
+                            ) : datasetPhotos.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                                    <div className="p-3 bg-muted rounded-full mb-3">
+                                        <ImageOff className="w-6 h-6" />
+                                    </div>
+                                    <p className="text-sm">Belum ada foto dataset untuk murid ini.</p>
+                                    <p className="text-xs mt-1">Tambahkan foto lewat menu Edit → Dataset Wajah.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                    {datasetPhotos.map((photo) => (
+                                        <div
+                                            key={photo.id}
+                                            className="relative group aspect-square rounded-lg overflow-hidden border bg-muted"
+                                        >
+                                            <img
+                                                src={`${API_BASE}${photo.url}`}
+                                                alt={`Dataset ${photo.photo_index + 1}`}
+                                                className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                                loading="lazy"
+                                                onError={(e) => {
+                                                    e.target.style.display = 'none'
+                                                    e.target.nextSibling.style.display = 'flex'
+                                                }}
+                                            />
+                                            <div
+                                                className="absolute inset-0 hidden items-center justify-center text-muted-foreground"
+                                            >
+                                                <ImageOff className="w-6 h-6" />
+                                            </div>
+                                            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/60 text-white text-xs font-medium">
+                                                Foto {photo.photo_index + 1}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

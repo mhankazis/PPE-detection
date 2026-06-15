@@ -49,7 +49,11 @@ class FaceRecognizer:
         self._load_model()
 
     def _load_model(self):
-        """Load InsightFace model (buffalo_sc — lightweight, ~100MB)."""
+        """Load InsightFace model (buffalo_sc — lightweight, ~100MB).
+
+        Strategy: detect available ONNX Runtime providers first, then load
+        with the best available. CPU is always available and used as fallback.
+        """
         try:
             import insightface
             from insightface.app import FaceAnalysis
@@ -58,29 +62,57 @@ class FaceRecognizer:
             self.app = None
             return
 
-        print("[FaceRecognizer] Loading InsightFace model...")
+        # Detect available providers
         try:
-            # Try GPU first
+            import onnxruntime as ort
+            available = ort.get_available_providers()
+        except Exception:
+            available = ["CPUExecutionProvider"]
+
+        has_cuda = "CUDAExecutionProvider" in available
+        print(f"[FaceRecognizer] Available ORT providers: {available}")
+
+        # Build provider list — CUDA first if available, CPU always as fallback
+        if has_cuda:
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            ctx_id = 0
+            mode_label = "GPU/CUDA"
+        else:
+            providers = ["CPUExecutionProvider"]
+            ctx_id = -1
+            mode_label = "CPU"
+
+        print(f"[FaceRecognizer] Loading InsightFace model ({mode_label} mode)...")
+        try:
             self.app = FaceAnalysis(
                 name="buffalo_sc",
-                providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+                providers=providers,
+                allowed_modules=["detection", "recognition"]
             )
-            self.app.prepare(ctx_id=0, det_size=(640, 640))
-            print("[FaceRecognizer] Model loaded (GPU mode)")
-        except Exception as e1:
-            print(f"[FaceRecognizer] GPU mode failed: {e1}")
-            try:
-                # Fallback to CPU
-                self.app = FaceAnalysis(
-                    name="buffalo_sc",
-                    providers=["CPUExecutionProvider"]
-                )
-                self.app.prepare(ctx_id=-1, det_size=(640, 640))
-                print("[FaceRecognizer] Model loaded (CPU mode)")
-            except Exception as e2:
-                print(f"[FaceRecognizer] CPU mode also failed: {e2}")
-                print("[FaceRecognizer] Face recognition DISABLED. Check insightface installation.")
-                self.app = None
+            self.app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            print(f"[FaceRecognizer] Model loaded successfully ({mode_label} mode)")
+        except Exception as e:
+            print(f"[FaceRecognizer] {mode_label} mode failed: {e}")
+            # Last resort: pure CPU
+            if has_cuda:
+                try:
+                    self.app = FaceAnalysis(
+                        name="buffalo_sc",
+                        providers=["CPUExecutionProvider"],
+                        allowed_modules=["detection", "recognition"]
+                    )
+                    self.app.prepare(ctx_id=-1, det_size=(640, 640))
+                    print("[FaceRecognizer] Model loaded (CPU fallback mode)")
+                    return
+                except Exception as e2:
+                    print(f"[FaceRecognizer] CPU fallback also failed: {e2}")
+            print("[FaceRecognizer] Face recognition DISABLED. Check insightface + onnxruntime installation.")
+            self.app = None
+
+    def reload_model(self) -> bool:
+        """Reload the InsightFace model. Returns True if loaded successfully."""
+        self._load_model()
+        return self.app is not None
 
     def _extract_embedding(self, image: np.ndarray) -> np.ndarray | None:
         """Extract face embedding from an image. Returns None if no face found or model not loaded."""
