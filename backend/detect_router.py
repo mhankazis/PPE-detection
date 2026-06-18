@@ -542,7 +542,14 @@ def _generate_detection_frames():
                             _log_violation(comp, annotated_frame)
 
                     last_annotated_frame = annotated_frame
-                except Exception:
+                except Exception as e:
+                    import traceback
+                    if not hasattr(_generate_detection_frames, "_logged_err"):
+                        _generate_detection_frames._logged_err = 0
+                    _generate_detection_frames._logged_err += 1
+                    if _generate_detection_frames._logged_err <= 3:
+                        print(f"[LiveDetect] detect_frame FAILED: {type(e).__name__}: {e}")
+                        traceback.print_exc()
                     last_annotated_frame = raw_frame
 
             # Encode the (possibly cached) annotated frame

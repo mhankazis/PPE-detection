@@ -17,7 +17,7 @@ _DEFAULT_CONFIG = {
     "email": "",
     "password": "",
     "device_serial": "",
-    "siren_duration": 5,
+    "siren_duration": 2,
 }
 
 
@@ -107,10 +107,10 @@ def trigger_siren():
     _last_trigger_time = now
 
     # --- Always activate browser alarm (primary alert method) ---
-    duration = EZVIZ_CONFIG.get("siren_duration", 5)
+    duration = EZVIZ_CONFIG.get("siren_duration", 2)
     with _alarm_lock:
         _alarm_active = True
-        _alarm_active_until = now + duration + 2  # buffer
+        _alarm_active_until = now + duration
     print(f"[Alarm] Browser alarm ACTIVATED for {duration}s")
 
     # --- Best-effort EZVIZ camera siren (secondary, may be silent on H6C) ---

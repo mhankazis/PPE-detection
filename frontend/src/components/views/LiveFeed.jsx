@@ -24,31 +24,22 @@ export default function LiveFeed() {
             if (loadingTimerRef.current) {
                 clearTimeout(loadingTimerRef.current);
             }
+            // Stop backend camera on unmount
+            fetch(`${API_BASE}/api/camera/stop`, { method: "POST" }).catch(() => { })
         }
     }, [])
 
-    // When toggling detection mode while connected, restart stream
+    // When toggling detection mode while connected, show loading briefly.
+    // MJPEG onLoad fires only on first frame; safety timeout guarantees dismissal.
     useEffect(() => {
         if (!isConnected) return
 
         setIsStreamLoading(true)
-        if (imgRef.current) {
-            const newSrc = detectionMode
-                ? `${API_BASE}/api/detect/live`
-                : `${API_BASE}/api/video_feed`
-            imgRef.current.src = ""
-            setTimeout(() => {
-                if (imgRef.current) {
-                    imgRef.current.src = newSrc
-                }
-            }, 100)
-        }
 
-        // Safety timeout: dismiss loading after 8s even if onLoad never fires
         if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
         loadingTimerRef.current = setTimeout(() => {
             setIsStreamLoading(false)
-        }, 8000)
+        }, 2500)
 
         return () => {
             if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
@@ -76,6 +67,8 @@ export default function LiveFeed() {
             clearTimeout(loadingTimerRef.current)
             loadingTimerRef.current = null
         }
+        // Stop backend camera stream + release RTSP resources
+        fetch(`${API_BASE}/api/camera/stop`, { method: "POST" }).catch(() => { })
     }
 
     const streamUrl = detectionMode
@@ -193,8 +186,9 @@ export default function LiveFeed() {
                             </div>
                         )}
 
-                        {/* Live Stream from backend — only set src when connected */}
+                        {/* Live Stream from backend — key forces remount on mode switch so MJPEG connection resets */}
                         <img
+                            key={`stream-${detectionMode}-${isConnected}`}
                             ref={imgRef}
                             src={isConnected ? streamUrl : ""}
                             alt="Live CCTV Feed"

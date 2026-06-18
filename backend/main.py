@@ -313,6 +313,23 @@ class CameraStream:
                     self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     consecutive_failures = 0
 
+    def stop(self):
+        """Stop the camera stream and release resources."""
+        self.running = False
+        if self.thread is not None:
+            self.thread.join(timeout=5)
+            self.thread = None
+        with self.lock:
+            if self.camera is not None:
+                try:
+                    self.camera.release()
+                except Exception:
+                    pass
+                self.camera = None
+            self.frame = None
+            self.raw_frame = None
+        print("[CameraStream] Stopped and resources released")
+
     def get_frame(self):
         """Get latest JPEG frame bytes."""
         with self.lock:
@@ -349,6 +366,12 @@ def video_feed():
     Stream MJPEG endpoint dari kamera CCTV (YOLOv11 ready).
     """
     return StreamingResponse(generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+@app.post("/api/camera/stop")
+def stop_camera():
+    """Stop the camera stream and release RTSP resources."""
+    camera_stream.stop()
+    return {"message": "Camera stopped"}
 
 if __name__ == "__main__":
     import uvicorn
