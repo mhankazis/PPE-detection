@@ -12,6 +12,7 @@ export default function Students() {
     const [editingId, setEditingId] = useState(null)
     const [selectedImage, setSelectedImage] = useState(null)
     const [previewUrl, setPreviewUrl] = useState(null)
+    const [originalPhotoUrl, setOriginalPhotoUrl] = useState(null) // track initial photo on edit
     const [isDragging, setIsDragging] = useState(false)
     const [formData, setFormData] = useState({ name: '', nis: '', class: '' })
     const [isSubmitting, setIsSubmitting] = useState(false)
@@ -98,6 +99,7 @@ export default function Students() {
         setFormData({ name: '', nis: '', class: '' })
         clearImage()
         setEditingId(null)
+        setOriginalPhotoUrl(null)
         stopCamera()
         setShowCameraCapture(false)
         setCapturedPhotos(0)
@@ -191,18 +193,19 @@ export default function Students() {
     }
 
     const handleUploadDataset = async (e) => {
-        const file = e.target.files?.[0]
-        if (!file || !editingId) return
+        const fileList = e.target.files
+        if (!fileList || fileList.length === 0 || !editingId) return
 
+        const files = Array.from(fileList)
         setIsCapturing(true)
         setCaptureMessage(null)
 
         try {
             const token = sessionStorage.getItem('token')
             const payload = new FormData()
-            payload.append('file', file)
+            files.forEach(f => payload.append('files', f))
 
-            const response = await fetch(`${API_BASE}/api/students/${editingId}/upload-dataset`, {
+            const response = await fetch(`${API_BASE}/api/students/${editingId}/upload-dataset-bulk`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: payload
@@ -211,7 +214,16 @@ export default function Students() {
             const data = await response.json()
             if (response.ok) {
                 setCapturedPhotos(data.total_photos)
-                setCaptureMessage({ type: 'success', text: `Foto ke-${data.total_photos} berhasil diupload!` })
+                const ok = data.success_count || 0
+                const fail = data.fail_count || 0
+                if (fail === 0) {
+                    setCaptureMessage({ type: 'success', text: `${ok} foto berhasil diupload. Total: ${data.total_photos} foto.` })
+                } else {
+                    setCaptureMessage({
+                        type: ok > 0 ? 'success' : 'error',
+                        text: `${ok} berhasil, ${fail} gagal (wajah tidak terdeteksi/file tidak valid). Total: ${data.total_photos} foto.`
+                    })
+                }
             } else {
                 setCaptureMessage({ type: 'error', text: data.detail || 'Gagal upload foto' })
             }
@@ -261,11 +273,11 @@ export default function Students() {
     const handleEdit = (student) => {
         setEditingId(student.id)
         setFormData({ name: student.name, nis: student.nim, class: student.kelas || '' })
-        if (student.photo_path) {
-            setPreviewUrl(`http://localhost:8000/${student.photo_path.replace(/\\/g, '/')}`)
-        } else {
-            setPreviewUrl(null)
-        }
+        const photoUrl = student.photo_path
+            ? `http://localhost:8000/${student.photo_path.replace(/\\/g, '/')}`
+            : null
+        setPreviewUrl(photoUrl)
+        setOriginalPhotoUrl(photoUrl) // remember initial state
         setSelectedImage(null)
         setActiveTab('add')
     }
@@ -356,7 +368,10 @@ export default function Students() {
             submitData.append('kelas', formData.class)
             if (selectedImage) {
                 submitData.append('file', selectedImage)
-            } else if (editingId && !previewUrl) {
+            } else if (editingId && originalPhotoUrl && !previewUrl) {
+                // Only mark photo for removal if there WAS a photo and user cleared it.
+                // Never send remove_photo when there was no photo to begin with
+                // (doing so used to wipe the entire face dataset).
                 submitData.append('remove_photo', 'true')
             }
 
@@ -717,11 +732,11 @@ export default function Students() {
                                         : 'bg-blue-500/10 text-blue-600 border border-blue-500/30 hover:bg-blue-500/20'
                                         }`}>
                                         <Upload className="w-4 h-4" />
-                                        Upload Foto
+                                        Upload Foto (Bulk)
                                         <input
                                             type="file"
                                             accept="image/*"
-                                            capture="user"
+                                            multiple
                                             className="hidden"
                                             onChange={handleUploadDataset}
                                             disabled={capturedPhotos >= MAX_PHOTOS}

@@ -53,7 +53,8 @@ class PPEDetector:
             cls._instance._initialized = False
         return cls._instance
 
-    # Inference input size — smaller = faster, slightly less accurate
+    # Inference input size — MUST match ONNX export size (640).
+    # Changing this breaks ONNX (fixed input dims). Re-export model to change.
     INFERENCE_SIZE = 640
 
     def __init__(self):

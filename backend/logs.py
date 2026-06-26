@@ -43,6 +43,36 @@ def get_logs(db: Session = Depends(get_db)):
         })
     return result
 
+@router.get("/{log_number}")
+def get_log_detail(log_number: str, db: Session = Depends(get_db)):
+    """Return full detail of a single log by log_number."""
+    log = db.query(models.Log).filter(models.Log.log_number == log_number).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    ts = log.timestamp
+    date_str = ts.strftime("%Y-%m-%d") if ts else ""
+    time_str = ts.strftime("%I:%M %p") if ts else ""
+
+    camera_name = log.camera.name if log.camera else f"Cam ID {log.camera_id}" if log.camera_id else "Main Camera"
+    student_name = log.student.name if log.student else "Unknown"
+    student_nim = log.student.nim if log.student else ""
+
+    return {
+        "id": log.log_number,
+        "date": date_str,
+        "time": time_str,
+        "camera": camera_name,
+        "type": log.violation_type,
+        "severity": log.severity,
+        "status": log.status,
+        "student": student_name,
+        "student_nim": student_nim,
+        "student_id": log.student_id,
+        "camera_id": log.camera_id,
+        "image_path": log.image_path,
+    }
+
 @router.post("/")
 def create_log(
     violation_type: str = Form(...),

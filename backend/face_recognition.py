@@ -90,6 +90,7 @@ class FaceRecognizer:
                 allowed_modules=["detection", "recognition"]
             )
             self.app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+            self._ctx_id = ctx_id
             print(f"[FaceRecognizer] Model loaded successfully ({mode_label} mode)")
         except Exception as e:
             print(f"[FaceRecognizer] {mode_label} mode failed: {e}")
@@ -102,6 +103,7 @@ class FaceRecognizer:
                         allowed_modules=["detection", "recognition"]
                     )
                     self.app.prepare(ctx_id=-1, det_size=(640, 640))
+                    self._ctx_id = -1
                     print("[FaceRecognizer] Model loaded (CPU fallback mode)")
                     return
                 except Exception as e2:
@@ -113,6 +115,20 @@ class FaceRecognizer:
         """Reload the InsightFace model. Returns True if loaded successfully."""
         self._load_model()
         return self.app is not None
+
+    def set_det_size(self, size: int):
+        """Override the face detector input size.
+
+        Smaller det_size = faster inference, slight accuracy tradeoff on tiny faces.
+        Useful for live feed where latency matters more than max accuracy.
+        """
+        if self.app is None:
+            return
+        try:
+            self.app.prepare(ctx_id=getattr(self, "_ctx_id", -1), det_size=(size, size))
+            print(f"[FaceRecognizer] det_size set to {size}x{size}")
+        except Exception as e:
+            print(f"[FaceRecognizer] set_det_size failed: {e}")
 
     def _extract_embedding(self, image: np.ndarray) -> np.ndarray | None:
         """Extract face embedding from an image. Returns None if no face found or model not loaded."""

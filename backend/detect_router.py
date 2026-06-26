@@ -19,6 +19,80 @@ UPLOAD_DIR = Path(".uploads/detections")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _get_face_recognition_context():
+    """
+    Lazy-load face recognizer + student name lookup for upload endpoints.
+    Returns (face_recognizer_or_None, student_names_dict).
+    Returns (None, {}) if no students enrolled or recognizer unavailable.
+    """
+    try:
+        from face_recognition import get_recognizer
+        recognizer = get_recognizer()
+        if recognizer.app is None or recognizer.get_cache_size() == 0:
+            return None, {}
+    except Exception as e:
+        print(f"[Detect] Face recognizer init failed: {e}")
+        return None, {}
+
+    student_names = {}
+    try:
+        from database import SessionLocal
+        import models
+        db = SessionLocal()
+        try:
+            students = db.query(models.Student).all()
+            student_names = {s.id: s.name for s in students}
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[Detect] Failed to load student names: {e}")
+
+    return recognizer, student_names
+
+
+def _identify_persons_in_compliance(frame, compliance, face_recognizer, student_names):
+    """
+    Run face recognition on each detected person bbox in `compliance`.
+    Mutates each comp dict: adds `identified_student_id` and `identified_name`.
+    Expands bbox by 20% if first identification attempt fails (more face context).
+    """
+    if face_recognizer is None:
+        print("[Detect] Face recognizer is None — skipping identification")
+        return
+
+    h, w = frame.shape[:2]
+    print(f"[Detect] Running face recognition on {len(compliance)} person(s), frame {w}x{h}, cache size={face_recognizer.get_cache_size()}")
+    for idx, comp in enumerate(compliance):
+        try:
+            bbox = comp.get("person_bbox", [])
+            if not bbox or len(bbox) != 4:
+                print(f"[Detect] Person {idx}: no valid bbox, skipping")
+                continue
+
+            print(f"[Detect] Person {idx}: bbox={bbox}")
+            student_id = face_recognizer.identify(frame, bbox)
+
+            # Retry with expanded bbox if first attempt failed
+            if student_id is None:
+                x1, y1, x2, y2 = bbox
+                bw, bh = x2 - x1, y2 - y1
+                ex1 = max(0, int(x1 - bw * 0.2))
+                ey1 = max(0, int(y1 - bh * 0.2))
+                ex2 = min(w, int(x2 + bw * 0.2))
+                ey2 = min(h, int(y2 + bh * 0.2))
+                print(f"[Detect] Person {idx}: retrying with expanded bbox={[ex1, ey1, ex2, ey2]}")
+                student_id = face_recognizer.identify(frame, [ex1, ey1, ex2, ey2])
+
+            if student_id is not None:
+                comp["identified_student_id"] = student_id
+                comp["identified_name"] = student_names.get(student_id, f"ID:{student_id}")
+                print(f"[Detect] Person {idx}: identified as {comp['identified_name']} (id={student_id})")
+            else:
+                print(f"[Detect] Person {idx}: not identified")
+        except Exception as e:
+            print(f"[Detect] Face recognition error for person: {e}")
+
+
 @router.post("/image")
 async def detect_image(file: UploadFile = File(...)):
     """
@@ -42,6 +116,19 @@ async def detect_image(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
 
+    # Face recognition: identify each detected person by name
+    import numpy as np
+    try:
+        face_recognizer, student_names = _get_face_recognition_context()
+        if face_recognizer is not None:
+            # Decode original image for face recognition (annotated bytes may have overlay)
+            img_array = np.frombuffer(image_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if frame is not None:
+                _identify_persons_in_compliance(frame, compliance, face_recognizer, student_names)
+    except Exception as e:
+        print(f"[Detect] Image face recognition failed: {e}")
+
     # Save annotated image
     filename = f"det_{uuid.uuid4().hex[:8]}.jpg"
     filepath = UPLOAD_DIR / filename
@@ -52,6 +139,7 @@ async def detect_image(file: UploadFile = File(...)):
     total_persons = len(compliance)
     compliant = sum(1 for c in compliance if c["is_compliant"])
     non_compliant = total_persons - compliant
+    identified_persons = sum(1 for c in compliance if c.get("identified_student_id") is not None)
 
     return {
         "success": True,
@@ -63,6 +151,7 @@ async def detect_image(file: UploadFile = File(...)):
             "total_persons": total_persons,
             "compliant": compliant,
             "non_compliant": non_compliant,
+            "identified_persons": identified_persons,
         }
     }
 
@@ -100,6 +189,9 @@ async def detect_video(file: UploadFile = File(...)):
     def _process_video():
         """Synchronous video processing — runs in thread pool."""
         detector = get_detector()
+
+        # Face recognition: identify each detected person by name
+        face_recognizer, student_names = _get_face_recognition_context()
 
         cap = cv2.VideoCapture(str(temp_input))
         if not cap.isOpened():
@@ -163,6 +255,10 @@ async def detect_video(file: UploadFile = File(...)):
                     for comp in compliance:
                         comp["person_bbox"] = [int(v / infer_scale) for v in comp["person_bbox"]]
 
+                # Face recognition on the original-resolution frame
+                if face_recognizer is not None:
+                    _identify_persons_in_compliance(frame, compliance, face_recognizer, student_names)
+
                 last_detections = detections
                 last_compliance = compliance
                 prev_detection_frame = frame.copy()
@@ -186,9 +282,14 @@ async def detect_video(file: UploadFile = File(...)):
         non_compliant = total_persons - compliant
 
         all_missing = set()
+        identified_persons = 0
+        identified_names = set()
         for c in all_compliance:
             for m in c.get("missing_ppe", []):
                 all_missing.add(m)
+            if c.get("identified_student_id") is not None:
+                identified_persons += 1
+                identified_names.add(c.get("identified_name", f"ID:{c['identified_student_id']}"))
 
         return {
             "success": True,
@@ -202,6 +303,8 @@ async def detect_video(file: UploadFile = File(...)):
                 "total_person_detections": total_persons,
                 "compliant_detections": compliant,
                 "non_compliant_detections": non_compliant,
+                "identified_persons": identified_persons,
+                "identified_names": sorted(identified_names),
                 "violation_types": list(all_missing),
                 "fps": fps,
                 "duration_seconds": round(frame_count / fps, 1) if fps > 0 else 0,
@@ -338,11 +441,17 @@ def detect_live_feed():
     )
 
 
-# Live detection configuration
+# Live detection configuration — tuned for low-latency real-time detection.
+# Using camera sub-stream (768x432) keeps YOLO input small; these values
+# balance smoothness vs inference cost on CPU/GPU.
 LIVE_INFER_MAX_DIM = 640         # Downscale frame to this max dimension for inference (640 = YOLO native, good accuracy)
-LIVE_JPEG_QUALITY = 70           # Lower quality for faster encoding
-LIVE_TARGET_FPS = 15             # Target output FPS (slightly lower to allow more inference time)
-LIVE_MIN_DETECT_INTERVAL = 0.15  # Minimum seconds between YOLO inferences (adaptive)
+LIVE_JPEG_QUALITY = 65           # Lower quality for faster encoding + smaller MJPEG payload
+LIVE_TARGET_FPS = 10             # Target output FPS — realistic for YOLO + face recognition per frame
+LIVE_MIN_DETECT_INTERVAL = 0.35  # Min seconds between YOLO inferences.
+                                 # On CPU YOLO ~180ms; 0.35s lets ~3 frames reuse
+                                 # last annotation → smoother stream, detection ~3 FPS.
+LIVE_FACE_REC_INTERVAL = 0.6     # Run face recognition at most every N seconds (heavy model, throttle it)
+LIVE_FACE_DET_SIZE = 320         # InsightFace det_size for live (lower = faster, minor accuracy tradeoff)
 
 
 def _generate_detection_frames():
@@ -371,6 +480,9 @@ def _generate_detection_frames():
         face_recognizer = get_recognizer()
         if face_recognizer.get_cache_size() == 0:
             face_recognizer = None  # No students enrolled, skip face recognition
+        else:
+            # Lower det_size for live feed — faster inference, minor accuracy tradeoff
+            face_recognizer.set_det_size(LIVE_FACE_DET_SIZE)
     except Exception as e:
         print(f"[LiveDetect] Face recognizer init failed: {e}")
         face_recognizer = None
@@ -394,8 +506,15 @@ def _generate_detection_frames():
     main_module.camera_stream.start()
 
     last_annotated_frame = None
+    last_detections = []      # Cached detections for skip-frame redraw
+    last_compliance = []      # Cached compliance for skip-frame redraw
     last_frame_id = -1
     last_detect_time = 0
+    last_face_rec_time = 0.0  # Throttle face recognition (heavy model)
+    # Cache last identified student per bbox-center key to avoid re-running
+    # InsightFace every frame when the person hasn't moved.
+    # {bbox_key: (student_id, name)}
+    face_id_cache = {}
     frame_interval = 1.0 / LIVE_TARGET_FPS
 
     # --- Auto-violation logging with debounce ---
@@ -500,41 +619,58 @@ def _generate_detection_frames():
                     # Run YOLO directly on raw frame — YOLO handles internal resizing (imgsz=640)
                     # No manual downscale needed; YOLO's internal resize is optimized
                     _, detections, compliance = detector.detect_frame(raw_frame, annotate=False)
+                    last_detections = detections
+                    last_compliance = compliance
 
                     annotated_frame = detector._draw_annotations(raw_frame.copy(), detections, compliance, lightweight=True)
 
-                    # Face recognition: identify ALL detected persons (compliant or not)
-                    if face_recognizer is not None:
-                        for comp in compliance:
+                    # Face recognition — THROTTLED for low latency.
+                    # InsightFace is heavy; running it every frame stalls the MJPEG stream.
+                    # Strategy:
+                    #   1. Run at most every LIVE_FACE_REC_INTERVAL seconds.
+                    #   2. Cache identity per bbox-center between runs so labels persist.
+                    #   3. No bbox-expand retry in live mode (saves ~50% face-rec time).
+                    run_face_rec = (
+                        face_recognizer is not None and
+                        (now - last_face_rec_time) >= LIVE_FACE_REC_INTERVAL
+                    )
+                    if run_face_rec:
+                        last_face_rec_time = now
+                        face_id_cache.clear()  # refresh cache this cycle
+
+                    for comp in compliance:
+                        px1, py1, px2, py2 = comp["person_bbox"]
+                        # Stable key from bbox center (quantized) — survives minor jitter
+                        cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
+                        bbox_key = (cx // 40, cy // 40)
+
+                        student_id = None
+                        if run_face_rec:
                             try:
                                 student_id = face_recognizer.identify(raw_frame, comp["person_bbox"])
-                                if student_id is None:
-                                    # Face not recognized — expand bbox to include more context
-                                    x1, y1, x2, y2 = comp["person_bbox"]
-                                    h, w = raw_frame.shape[:2]
-                                    bw, bh = x2 - x1, y2 - y1
-                                    ex1 = max(0, int(x1 - bw * 0.2))
-                                    ey1 = max(0, int(y1 - bh * 0.2))
-                                    ex2 = min(w, int(x2 + bw * 0.2))
-                                    ey2 = min(h, int(y2 + bh * 0.2))
-                                    student_id = face_recognizer.identify(raw_frame, [ex1, ey1, ex2, ey2])
-                                if student_id is not None:
-                                    comp["identified_student_id"] = student_id
-                                    # Draw student name label above person box
-                                    student_name = student_names.get(student_id, f"ID:{student_id}")
-                                    px1, py1, px2, py2 = comp["person_bbox"]
-                                    frame_w = annotated_frame.shape[1]
-                                    sf = max(frame_w / 640, 1.0)
-                                    name_scale = 0.7 * sf
-                                    name_thick = max(2, int(2 * sf))
-                                    pad = int(6 * sf)
-                                    (text_w, text_h), _ = cv2.getTextSize(student_name, cv2.FONT_HERSHEY_SIMPLEX, name_scale, name_thick)
-                                    cv2.rectangle(annotated_frame, (px1, py1 - text_h - pad * 3), (px1 + text_w + pad * 2, py1 - pad), (0, 0, 0), -1)
-                                    cv2.putText(annotated_frame, student_name,
-                                                (px1 + pad, py1 - pad * 2), cv2.FONT_HERSHEY_SIMPLEX,
-                                                name_scale, (0, 255, 255), name_thick, cv2.LINE_AA)
                             except Exception as e:
                                 print(f"[LiveDetect] Face recognition error: {e}")
+                            if student_id is not None:
+                                student_name = student_names.get(student_id, f"ID:{student_id}")
+                                face_id_cache[bbox_key] = (student_id, student_name)
+                        else:
+                            cached = face_id_cache.get(bbox_key)
+                            if cached is not None:
+                                student_id, student_name = cached
+
+                        if student_id is not None:
+                            comp["identified_student_id"] = student_id
+                            # Draw student name label above person box
+                            frame_w = annotated_frame.shape[1]
+                            sf = max(frame_w / 640, 1.0)
+                            name_scale = 0.7 * sf
+                            name_thick = max(2, int(2 * sf))
+                            pad = int(6 * sf)
+                            (text_w, text_h), _ = cv2.getTextSize(student_name, cv2.FONT_HERSHEY_SIMPLEX, name_scale, name_thick)
+                            cv2.rectangle(annotated_frame, (px1, py1 - text_h - pad * 3), (px1 + text_w + pad * 2, py1 - pad), (0, 0, 0), -1)
+                            cv2.putText(annotated_frame, student_name,
+                                        (px1 + pad, py1 - pad * 2), cv2.FONT_HERSHEY_SIMPLEX,
+                                        name_scale, (0, 255, 255), name_thick, cv2.LINE_AA)
 
                     # Auto-log violations for non-compliant persons (with debounce)
                     for comp in compliance:
@@ -552,8 +688,17 @@ def _generate_detection_frames():
                         traceback.print_exc()
                     last_annotated_frame = raw_frame
 
-            # Encode the (possibly cached) annotated frame
-            out_frame = last_annotated_frame if last_annotated_frame is not None else raw_frame
+            # Build output frame:
+            # - If we just ran detection this cycle → use fresh annotated_frame
+            # - If skipping (between detections) → redraw CACHED detections on
+            #   the LATEST raw frame. This keeps the video motion live/smooth
+            #   while only paying YOLO cost every LIVE_MIN_DETECT_INTERVAL.
+            if last_annotated_frame is not None and not should_detect and last_detections:
+                out_frame = detector._draw_annotations(
+                    raw_frame.copy(), last_detections, last_compliance, lightweight=True
+                )
+            else:
+                out_frame = last_annotated_frame if last_annotated_frame is not None else raw_frame
             _, buffer = cv2.imencode('.jpg', out_frame,
                                      [cv2.IMWRITE_JPEG_QUALITY, LIVE_JPEG_QUALITY])
             frame_bytes = buffer.tobytes()

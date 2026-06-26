@@ -2,11 +2,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
-import { useState, useEffect, useRef } from "react"
-import { Shield, User, Key, CheckCircle, AlertCircle, Loader2, Bell, Volume2 } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Shield, User, Key, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown } from "lucide-react"
 
 export default function Settings() {
-    const { user, fetchProfile } = useAuth()
+    const { user } = useAuth()
 
     const [profileData, setProfileData] = useState({
         username: "",
@@ -23,17 +23,14 @@ export default function Settings() {
     const [isSaving, setIsSaving] = useState(false)
     const [message, setMessage] = useState({ type: "", text: "" })
 
-    // EZVIZ config state
-    const [ezvizData, setEzvizData] = useState({
-        enabled: false,
-        email: "",
-        password: "",
-        device_serial: "",
-        siren_duration: 5,
-        password_set: false,
-    })
-    const [isEzvizSaving, setIsEzvizSaving] = useState(false)
-    const [ezvizMsg, setEzvizMsg] = useState({ type: "", text: "" })
+    // Siren config state (simplified — no EZVIZ credentials)
+    const [sirenEnabled, setSirenEnabled] = useState(false)
+    const [sirenDuration, setSirenDuration] = useState(5)
+    const [isSirenSaving, setIsSirenSaving] = useState(false)
+    const [sirenMsg, setSirenMsg] = useState({ type: "", text: "" })
+
+    // Accordion open state
+    const [openSection, setOpenSection] = useState("profile") // "profile" | "password" | "siren"
 
     useEffect(() => {
         if (user) {
@@ -45,9 +42,9 @@ export default function Settings() {
         }
     }, [user])
 
-    // Fetch EZVIZ config
+    // Fetch siren config (only enabled + duration now)
     useEffect(() => {
-        const fetchEzvizConfig = async () => {
+        const fetchSirenConfig = async () => {
             try {
                 const token = sessionStorage.getItem('token')
                 const res = await fetch('http://localhost:8000/api/ezviz-config', {
@@ -55,21 +52,14 @@ export default function Settings() {
                 })
                 if (res.ok) {
                     const data = await res.json()
-                    setEzvizData(prev => ({
-                        ...prev,
-                        enabled: data.enabled || false,
-                        email: data.email || "",
-                        device_serial: data.device_serial || "",
-                        siren_duration: data.siren_duration || 5,
-                        password_set: data.password_set || false,
-                        password: "",
-                    }))
+                    setSirenEnabled(data.enabled || false)
+                    setSirenDuration(data.siren_duration || 5)
                 }
             } catch (e) {
-                console.error("Failed to fetch EZVIZ config", e)
+                console.error("Failed to fetch siren config", e)
             }
         }
-        fetchEzvizConfig()
+        fetchSirenConfig()
     }, [])
 
     const handlePasswordChange = (e) => {
@@ -129,43 +119,34 @@ export default function Settings() {
         return role
     }
 
-    const handleSaveEzviz = async () => {
-        setEzvizMsg({ type: "", text: "" })
-        setIsEzvizSaving(true)
+    const handleSaveSiren = async () => {
+        setSirenMsg({ type: "", text: "" })
+        setIsSirenSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const payload = {
-                enabled: ezvizData.enabled,
-                email: ezvizData.email,
-                device_serial: ezvizData.device_serial,
-                siren_duration: ezvizData.siren_duration,
-            }
-            if (ezvizData.password) {
-                payload.password = ezvizData.password
-            }
             const res = await fetch('http://localhost:8000/api/ezviz-config', {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(payload),
+                body: JSON.stringify({
+                    enabled: sirenEnabled,
+                    siren_duration: sirenDuration,
+                }),
             })
             if (res.ok) {
-                setEzvizMsg({ type: "success", text: "Konfigurasi EZVIZ berhasil disimpan." })
-                setEzvizData(prev => ({ ...prev, password: "", password_set: prev.password_set || !!ezvizData.password }))
+                setSirenMsg({ type: "success", text: "Pengaturan siren berhasil disimpan." })
             } else {
                 const err = await res.json()
-                setEzvizMsg({ type: "error", text: err.detail || "Gagal menyimpan konfigurasi." })
+                setSirenMsg({ type: "error", text: err.detail || "Gagal menyimpan pengaturan." })
             }
         } catch (err) {
-            setEzvizMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+            setSirenMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
         } finally {
-            setIsEzvizSaving(false)
+            setIsSirenSaving(false)
         }
     }
-
-    const testAudioRef = useRef(null)
 
     const playTestSiren = () => {
         try {
@@ -193,7 +174,7 @@ export default function Settings() {
     }
 
     const handleTestSiren = async () => {
-        setEzvizMsg({ type: "", text: "" })
+        setSirenMsg({ type: "", text: "" })
         playTestSiren()
         try {
             const token = sessionStorage.getItem('token')
@@ -202,13 +183,13 @@ export default function Settings() {
                 headers: { 'Authorization': `Bearer ${token}` },
             })
             if (res.ok) {
-                setEzvizMsg({ type: "success", text: "Alarm test berbunyi di browser. (Kamera H6C tidak punya siren hardware)" })
+                setSirenMsg({ type: "success", text: "Alarm test berbunyi di browser." })
             } else {
                 const err = await res.json()
-                setEzvizMsg({ type: "error", text: err.detail || "Gagal mengirim test alarm." })
+                setSirenMsg({ type: "error", text: err.detail || "Gagal mengirim test alarm." })
             }
         } catch (err) {
-            setEzvizMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+            setSirenMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
         }
     }
 
@@ -218,6 +199,31 @@ export default function Settings() {
         return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })
     }
 
+    const toggleSection = (section) => {
+        setOpenSection(openSection === section ? "" : section)
+    }
+
+    const AccordionHeader = ({ icon: Icon, title, description, badge, section }) => (
+        <button
+            onClick={() => toggleSection(section)}
+            className="w-full flex items-center justify-between text-left transition-colors hover:bg-muted/40"
+        >
+            <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Icon className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                    <CardTitle className="text-base">{title}</CardTitle>
+                    <CardDescription className="text-xs">{description}</CardDescription>
+                </div>
+            </div>
+            <div className="flex items-center gap-3">
+                {badge}
+                <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform ${openSection === section ? "rotate-180" : ""}`} />
+            </div>
+        </button>
+    )
+
     return (
         <div className="p-8 space-y-8 max-w-4xl mx-auto animate-in fade-in duration-500">
             <div>
@@ -225,41 +231,40 @@ export default function Settings() {
                 <p className="text-muted-foreground mt-1">Kelola pengaturan akun dan profil Anda.</p>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-3">
-                {/* Sidebar - Profile Card */}
-                <div className="md:col-span-1 space-y-6">
-                    <Card>
-                        <CardHeader className="text-center">
-                            <div className="mx-auto w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-                                <User className="w-12 h-12 text-primary" />
-                            </div>
-                            <CardTitle>{profileData.username}</CardTitle>
-                            <CardDescription>{roleLabel(profileData.role)}</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground border-t pt-4">
-                                <Shield className="w-4 h-4 text-primary" />
-                                <span>Peran: {roleLabel(profileData.role)}</span>
-                            </div>
-                            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                                <Key className="w-4 h-4 text-primary" />
-                                <span>Terdaftar: {formatDate(profileData.created_at)}</span>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
+            <div className="space-y-4">
+                {/* Profile Card — Sidebar style compact */}
+                <Card className="md:col-span-1">
+                    <CardHeader className="text-center pb-2">
+                        <div className="mx-auto w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-3">
+                            <User className="w-10 h-10 text-primary" />
+                        </div>
+                        <CardTitle>{profileData.username}</CardTitle>
+                        <CardDescription>{roleLabel(profileData.role)}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3 pt-2">
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground border-t pt-3">
+                            <Shield className="w-4 h-4 text-primary" />
+                            <span>Peran: {roleLabel(profileData.role)}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                            <Key className="w-4 h-4 text-primary" />
+                            <span>Terdaftar: {formatDate(profileData.created_at)}</span>
+                        </div>
+                    </CardContent>
+                </Card>
 
-                {/* Main Content */}
-                <div className="md:col-span-2 space-y-6">
-                    {/* Profile Info Card */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Informasi Profil</CardTitle>
-                            <CardDescription>
-                                Detail akun Anda saat ini.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
+                {/* Accordion: Informasi Profil */}
+                <Card>
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={User}
+                            title="Informasi Profil"
+                            description="Detail akun Anda saat ini."
+                            section="profile"
+                        />
+                    </CardHeader>
+                    {openSection === "profile" && (
+                        <CardContent className="space-y-6 pt-2">
                             <div className="space-y-2">
                                 <label className="text-sm font-medium leading-none">Username</label>
                                 <input
@@ -289,170 +294,150 @@ export default function Settings() {
                                 </div>
                             </div>
                         </CardContent>
-                    </Card>
+                    )}
+                </Card>
 
-                    {/* Change Password Card */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Ubah Password</CardTitle>
-                            <CardDescription>
-                                Perbarui password akun Anda untuk keamanan.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none" htmlFor="currentPassword">Password Lama</label>
-                                <input
-                                    id="currentPassword"
-                                    name="currentPassword"
-                                    type="password"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder="Masukkan password lama"
-                                    value={passwordData.currentPassword}
-                                    onChange={handlePasswordChange}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none" htmlFor="newPassword">Password Baru</label>
-                                <input
-                                    id="newPassword"
-                                    name="newPassword"
-                                    type="password"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder="Masukkan password baru"
-                                    value={passwordData.newPassword}
-                                    onChange={handlePasswordChange}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none" htmlFor="confirmPassword">Konfirmasi Password</label>
-                                <input
-                                    id="confirmPassword"
-                                    name="confirmPassword"
-                                    type="password"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder="Ulangi password baru"
-                                    value={passwordData.confirmPassword}
-                                    onChange={handlePasswordChange}
-                                />
-                            </div>
-
-                            {message.text && (
-                                <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${message.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
-                                    {message.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                                    {message.text}
+                {/* Accordion: Ubah Password */}
+                <Card>
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={Key}
+                            title="Ubah Password"
+                            description="Perbarui password akun Anda untuk keamanan."
+                            section="password"
+                        />
+                    </CardHeader>
+                    {openSection === "password" && (
+                        <>
+                            <CardContent className="space-y-4 pt-2">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none" htmlFor="currentPassword">Password Lama</label>
+                                    <input
+                                        id="currentPassword"
+                                        name="currentPassword"
+                                        type="password"
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        placeholder="Masukkan password lama"
+                                        value={passwordData.currentPassword}
+                                        onChange={handlePasswordChange}
+                                    />
                                 </div>
-                            )}
-                        </CardContent>
-                        <CardFooter className="bg-muted/30 pt-4 flex justify-end">
-                            <Button onClick={handleSavePassword} disabled={isSaving} className="min-w-[140px]">
-                                {isSaving ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                        Menyimpan...
-                                    </>
-                                ) : "Simpan Password"}
-                            </Button>
-                        </CardFooter>
-                    </Card>
-
-                    {/* EZVIZ Siren Config Card */}
-                    <Card>
-                        <CardHeader>
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Bell className="w-5 h-5" />
-                                        Siren EZVIZ
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Konfigurasi siren kamera EZVIZ saat pelanggaran terdeteksi.
-                                    </CardDescription>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none" htmlFor="newPassword">Password Baru</label>
+                                    <input
+                                        id="newPassword"
+                                        name="newPassword"
+                                        type="password"
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        placeholder="Masukkan password baru"
+                                        value={passwordData.newPassword}
+                                        onChange={handlePasswordChange}
+                                    />
                                 </div>
-                                <Badge variant={ezvizData.enabled ? "default" : "secondary"} className={ezvizData.enabled ? "bg-green-500 hover:bg-green-600" : ""}>
-                                    {ezvizData.enabled ? "Aktif" : "Nonaktif"}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none" htmlFor="confirmPassword">Konfirmasi Password</label>
+                                    <input
+                                        id="confirmPassword"
+                                        name="confirmPassword"
+                                        type="password"
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        placeholder="Ulangi password baru"
+                                        value={passwordData.confirmPassword}
+                                        onChange={handlePasswordChange}
+                                    />
+                                </div>
+
+                                {message.text && (
+                                    <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${message.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+                                        {message.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                        {message.text}
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter className="bg-muted/30 pt-4 flex justify-end">
+                                <Button onClick={handleSavePassword} disabled={isSaving} className="min-w-[140px]">
+                                    {isSaving ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                            Menyimpan...
+                                        </>
+                                    ) : "Simpan Password"}
+                                </Button>
+                            </CardFooter>
+                        </>
+                    )}
+                </Card>
+
+                {/* Accordion: Siren / Alarm */}
+                <Card>
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={Bell}
+                            title="Siren & Alarm"
+                            description="Pengaturan siren otomatis saat pelanggaran terdeteksi."
+                            badge={
+                                <Badge variant={sirenEnabled ? "default" : "secondary"} className={sirenEnabled ? "bg-green-500 hover:bg-green-600" : ""}>
+                                    {sirenEnabled ? "Aktif" : "Nonaktif"}
                                 </Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                                <div className="flex items-center gap-2">
-                                    <Volume2 className="w-4 h-4 text-muted-foreground" />
-                                    <span className="text-sm font-medium">Aktifkan Siren</span>
+                            }
+                            section="siren"
+                        />
+                    </CardHeader>
+                    {openSection === "siren" && (
+                        <>
+                            <CardContent className="space-y-4 pt-2">
+                                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                                    <div className="flex items-center gap-2">
+                                        <Volume2 className="w-4 h-4 text-muted-foreground" />
+                                        <div>
+                                            <span className="text-sm font-medium block">Aktifkan Siren</span>
+                                            <span className="text-[0.8rem] text-muted-foreground">Bunyikan siren otomatis saat ada pelanggaran PPE.</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setSirenEnabled(prev => !prev)}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${sirenEnabled ? 'bg-primary' : 'bg-muted'}`}
+                                    >
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${sirenEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => setEzvizData(prev => ({ ...prev, enabled: !prev.enabled }))}
-                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${ezvizData.enabled ? 'bg-primary' : 'bg-muted'}`}
-                                >
-                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${ezvizData.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
-                                </button>
-                            </div>
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none">Email Akun EZVIZ</label>
-                                <input
-                                    type="email"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder="email@contoh.com"
-                                    value={ezvizData.email}
-                                    onChange={(e) => setEzvizData(prev => ({ ...prev, email: e.target.value }))}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none">Password EZVIZ</label>
-                                <input
-                                    type="password"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder={ezvizData.password_set ? "•••••••• (sudah disimpan)" : "Masukkan password EZVIZ"}
-                                    value={ezvizData.password}
-                                    onChange={(e) => setEzvizData(prev => ({ ...prev, password: e.target.value }))}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none">Serial Number Kamera</label>
-                                <input
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    placeholder="Contoh: C6CN01234567890"
-                                    value={ezvizData.device_serial}
-                                    onChange={(e) => setEzvizData(prev => ({ ...prev, device_serial: e.target.value }))}
-                                />
-                                <p className="text-[0.8rem] text-muted-foreground">Ditemukan di aplikasi EZVIZ → Pengaturan Perangkat → Info Perangkat.</p>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium leading-none">Durasi Siren (detik)</label>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={30}
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    value={ezvizData.siren_duration}
-                                    onChange={(e) => setEzvizData(prev => ({ ...prev, siren_duration: parseInt(e.target.value) || 5 }))}
-                                />
-                            </div>
-
-                            {ezvizMsg.text && (
-                                <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${ezvizMsg.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
-                                    {ezvizMsg.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                                    {ezvizMsg.text}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none">Durasi Siren (detik)</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={30}
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        value={sirenDuration}
+                                        onChange={(e) => setSirenDuration(parseInt(e.target.value) || 5)}
+                                    />
                                 </div>
-                            )}
-                        </CardContent>
-                        <CardFooter className="bg-muted/30 pt-4 flex justify-between">
-                            <Button variant="outline" onClick={handleTestSiren} disabled={isEzvizSaving}>
-                                <Volume2 className="w-4 h-4 mr-2" />
-                                Test Alarm
-                            </Button>
-                            <Button onClick={handleSaveEzviz} disabled={isEzvizSaving} className="min-w-[140px]">
-                                {isEzvizSaving ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                        Menyimpan...
-                                    </>
-                                ) : "Simpan Konfigurasi"}
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                </div>
+
+                                {sirenMsg.text && (
+                                    <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${sirenMsg.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+                                        {sirenMsg.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                        {sirenMsg.text}
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter className="bg-muted/30 pt-4 flex justify-between">
+                                <Button variant="outline" onClick={handleTestSiren} disabled={isSirenSaving}>
+                                    <Volume2 className="w-4 h-4 mr-2" />
+                                    Test Alarm
+                                </Button>
+                                <Button onClick={handleSaveSiren} disabled={isSirenSaving} className="min-w-[140px]">
+                                    {isSirenSaving ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                            Menyimpan...
+                                        </>
+                                    ) : "Simpan"}
+                                </Button>
+                            </CardFooter>
+                        </>
+                    )}
+                </Card>
             </div>
         </div>
     )

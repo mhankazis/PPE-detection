@@ -140,18 +140,33 @@ export default function VideoUploadContent() {
                 const statusText = comp.is_compliant
                     ? '✓ APD LENGKAP'
                     : `✗ KURANG: ${comp.missing_ppe.join(', ')}`
-                const bgColor = comp.is_compliant ? '#16a34a' : '#dc2626'
 
+                const nameText = comp.identified_name ? `👤 ${comp.identified_name}` : null
                 ctx.font = 'bold 11px Inter, system-ui, sans-serif'
                 const tm = ctx.measureText(statusText)
+                const nameTm = nameText ? ctx.measureText(nameText) : { width: 0 }
+                const barW = Math.max(tm.width + 14, nameTm.width + 14)
                 const barH = 20
+                const nameBarH = nameText ? 18 : 0
 
+                // Status bar
+                const bgColor = comp.is_compliant ? '#16a34a' : '#dc2626'
                 ctx.fillStyle = bgColor
                 ctx.globalAlpha = 0.9
-                ctx.fillRect(sx, sy2, tm.width + 14, barH)
+                ctx.fillRect(sx, sy2, barW, barH)
                 ctx.globalAlpha = 1.0
                 ctx.fillStyle = '#ffffff'
                 ctx.fillText(statusText, sx + 7, sy2 + barH - 5)
+
+                // Name bar (above status)
+                if (nameText) {
+                    ctx.fillStyle = '#2563eb'
+                    ctx.globalAlpha = 0.95
+                    ctx.fillRect(sx, sy2 - nameBarH, barW, nameBarH)
+                    ctx.globalAlpha = 1.0
+                    ctx.fillStyle = '#ffffff'
+                    ctx.fillText(nameText, sx + 7, sy2 - 5)
+                }
             }
         }
     }, [results, activeFilters])

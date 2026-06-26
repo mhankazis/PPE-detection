@@ -114,16 +114,15 @@ async def update_student(
     db.commit()
     db.refresh(student)
     
-    # Update face embedding cache
+    # Update face embedding cache (profile photo only — dataset photos are managed separately)
     try:
         from face_recognition import get_recognizer
         recognizer = get_recognizer()
-        if remove_photo or (file and student.photo_path):
-            # Re-enroll with new photo, or remove if photo removed
-            if student.photo_path:
-                recognizer.enroll_student(student.id, student.photo_path, db=db)
-            else:
-                recognizer.remove_student(student.id, db=db)
+        # Only re-enroll when a NEW profile photo was uploaded.
+        # Removing the profile photo must NOT delete the face dataset
+        # (dataset has its own clear endpoint via DELETE /{id}/dataset-photos).
+        if file and student.photo_path:
+            recognizer.enroll_student(student.id, student.photo_path, db=db)
     except Exception as e:
         print(f"[Students] Face cache update failed for {student.id}: {e}")
     
@@ -394,4 +393,84 @@ async def upload_dataset_photo(
         "message": "Dataset photo uploaded",
         "student_id": student_id,
         "total_photos": photo_count
+    }
+
+
+@router.post("/{student_id}/upload-dataset-bulk")
+async def upload_dataset_bulk(
+    student_id: int,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Upload multiple photos at once and add them to the student's face dataset.
+    Returns per-file result + total count.
+    """
+    import cv2
+    import numpy as np
+
+    student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    try:
+        from face_recognition import get_recognizer
+        recognizer = get_recognizer()
+        if recognizer.app is None:
+            print("[Students] Face model not loaded — attempting reload...")
+            if not recognizer.reload_model():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Face recognition model not loaded. Pastikan insightface terinstall dan model buffalo_sc sudah didownload."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Face recognition init failed: {str(e)}")
+
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    for idx, file in enumerate(files):
+        fname = file.filename or f"photo_{idx}"
+        if not file.content_type or not file.content_type.startswith("image/"):
+            results.append({"file": fname, "ok": False, "error": "Not an image"})
+            fail_count += 1
+            continue
+
+        try:
+            image_bytes = await file.read()
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                results.append({"file": fname, "ok": False, "error": "Invalid image"})
+                fail_count += 1
+                continue
+
+            success = recognizer.enroll_student_from_frame(student_id, frame, db=db)
+            if success:
+                results.append({"file": fname, "ok": True})
+                success_count += 1
+            else:
+                results.append({"file": fname, "ok": False, "error": "No face detected"})
+                fail_count += 1
+        except Exception as e:
+            results.append({"file": fname, "ok": False, "error": str(e)})
+            fail_count += 1
+
+    photo_count = recognizer.get_photo_count(student_id)
+
+    return {
+        "message": f"Bulk upload done: {success_count} ok, {fail_count} failed",
+        "student_id": student_id,
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "total_photos": photo_count,
+        "results": results,
     }

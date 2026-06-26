@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react"
+import { useSearchParams } from "react-router-dom"
 import {
     Table,
     TableBody,
@@ -36,6 +37,8 @@ export default function Logs() {
     const [dateTo, setDateTo] = useState("")
     const [selectedTypes, setSelectedTypes] = useState([])
     const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false)
+    const [searchParams, setSearchParams] = useSearchParams()
+    const editTargetId = searchParams.get("edit")
 
     // Sorting & Pagination state
     const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'desc' })
@@ -96,6 +99,17 @@ export default function Logs() {
         fetchLogs();
         fetchStudents();
     }, []);
+
+    // Auto-open edit dialog when navigated with ?edit=ID
+    useEffect(() => {
+        if (!editTargetId || logs.length === 0) return
+        const target = logs.find(l => l.id === editTargetId)
+        if (target) {
+            handleEdit(target)
+            // Clear the param so it doesn't re-trigger on every render
+            setSearchParams({}, { replace: true })
+        }
+    }, [editTargetId, logs]);
 
     const handleSort = (key) => {
         let direction = 'asc';

@@ -109,6 +109,51 @@ def face_recognition_status():
         return {"enabled": False, "enrolled_students": 0, "model_loaded": False, "error": str(e)}
 
 
+@app.get("/api/face-diag")
+def face_recognition_diagnostic():
+    """TEMP diagnostic: run identify() on first dataset photo using server recognizer."""
+    import os, cv2, numpy as np
+    from face_recognition import get_recognizer, SIMILARITY_THRESHOLD, MIN_FACE_SIZE
+    recognizer = get_recognizer()
+    result = {
+        "model_loaded": recognizer.app is not None,
+        "cache_size": recognizer.get_cache_size(),
+        "threshold": SIMILARITY_THRESHOLD,
+        "min_face_size": MIN_FACE_SIZE,
+        "raw_embeddings_keys": list(recognizer._raw_embeddings.keys()),
+        "cache_keys": list(recognizer.embedding_cache.keys()),
+        "tests": [],
+    }
+    dataset_dir = ".uploads/dataset"
+    if not os.path.isdir(dataset_dir):
+        result["error"] = f"Dataset dir not found: {dataset_dir}"
+        return result
+    photos = sorted([f for f in os.listdir(dataset_dir) if f.endswith(".jpg")])[:5]
+    for fname in photos:
+        fpath = os.path.join(dataset_dir, fname)
+        img = cv2.imread(fpath)
+        if img is None:
+            result["tests"].append({"file": fname, "error": "cannot read"})
+            continue
+        h, w = img.shape[:2]
+        # Detect faces in full image
+        faces = recognizer.app.get(img) if recognizer.app else []
+        face_info = [{"bbox": [int(v) for v in f.bbox], "size": int(f.bbox[2]-f.bbox[0])} for f in faces]
+        test = {"file": fname, "img_size": [w, h], "faces_found": len(faces), "face_details": face_info}
+        if faces:
+            # Compute similarity to all cached embeddings
+            best_face = max(faces, key=lambda f: f.bbox[2]-f.bbox[0])
+            query = best_face.normed_embedding
+            sims = {}
+            with recognizer._cache_lock:
+                for sid, emb in recognizer.embedding_cache.items():
+                    sims[sid] = round(float(np.dot(query, emb)), 4)
+            test["similarities"] = sims
+            test["identified"] = max(sims, key=sims.get) if sims else None
+        result["tests"].append(test)
+    return result
+
+
 @app.post("/api/face-reload")
 def face_recognition_reload(current_user: models.User = Depends(get_current_user)):
     """Reload InsightFace model without restarting server. Admin/operator only."""
@@ -125,19 +170,57 @@ def face_recognition_reload(current_user: models.User = Depends(get_current_user
         return {"success": False, "error": str(e)}
 
 @app.get("/api/dashboard")
-def dashboard_stats():
-    """Return dashboard statistics from the database."""
+def dashboard_stats(range_type: str = "today", date: str = None, severity: str = None):
+    """Return dashboard statistics from the database.
+
+    Query params:
+      - range_type: "today" | "week" | "month" | "all"  (default: today)
+      - date:       "YYYY-MM-DD" — anchor date for the range (default: today)
+      - severity:   "Low" | "Medium" | "High" | "Critical" — filter recent list (default: none)
+    """
     from database import SessionLocal
-    from datetime import datetime, timedelta
-    import sqlalchemy as sa
+    from datetime import datetime, timedelta, date as date_cls
 
     db = SessionLocal()
     try:
-        today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time())
+        # Parse anchor date
+        if date:
+            try:
+                anchor = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                anchor = datetime.now().date()
+        else:
+            anchor = datetime.now().date()
 
-        # Total violations today
-        violations_today = db.query(models.Log).filter(models.Log.timestamp >= today_start).count()
+        # Determine window
+        if range_type == "today":
+            window_start = datetime.combine(anchor, datetime.min.time())
+            window_end = datetime.combine(anchor + timedelta(days=1), datetime.min.time())
+            span_days = 1
+        elif range_type == "week":
+            # 7 days ending at anchor (inclusive)
+            window_start = datetime.combine(anchor - timedelta(days=6), datetime.min.time())
+            window_end = datetime.combine(anchor + timedelta(days=1), datetime.min.time())
+            span_days = 7
+        elif range_type == "month":
+            # 30 days ending at anchor (inclusive)
+            window_start = datetime.combine(anchor - timedelta(days=29), datetime.min.time())
+            window_end = datetime.combine(anchor + timedelta(days=1), datetime.min.time())
+            span_days = 30
+        else:  # all
+            window_start = None
+            window_end = None
+            span_days = 30
+
+        def in_window(q):
+            if window_start is not None:
+                q = q.filter(models.Log.timestamp >= window_start)
+            if window_end is not None:
+                q = q.filter(models.Log.timestamp < window_end)
+            return q
+
+        # Violations within window
+        violations_in_window = in_window(db.query(models.Log)).count()
 
         # Total violations all time
         violations_total = db.query(models.Log).count()
@@ -145,24 +228,25 @@ def dashboard_stats():
         # Total students
         total_students = db.query(models.Student).count()
 
-        # Violations still "Belum Dihukum"
-        unresolved = db.query(models.Log).filter(models.Log.status == "Belum Dihukum").count()
+        # Unresolved / resolved within window
+        unresolved = in_window(db.query(models.Log)).filter(models.Log.status == "Belum Dihukum").count()
+        resolved = in_window(db.query(models.Log)).filter(models.Log.status == "Sudah Dihukum").count()
 
-        # Resolved
-        resolved = db.query(models.Log).filter(models.Log.status == "Sudah Dihukum").count()
+        # Compliance rate within window
+        compliance_rate = round((resolved / violations_in_window * 100) if violations_in_window > 0 else 100, 1)
 
-        # Compliance rate: resolved / total (or 100 if no violations)
-        compliance_rate = round((resolved / violations_total * 100) if violations_total > 0 else 100, 1)
-
-        # Severity breakdown
+        # Severity breakdown within window
         severity_counts = {}
         for sev in ["Low", "Medium", "High", "Critical"]:
-            severity_counts[sev] = db.query(models.Log).filter(models.Log.severity == sev).count()
+            severity_counts[sev] = in_window(db.query(models.Log)).filter(models.Log.severity == sev).count()
 
-        # Recent 5 violations
-        recent = db.query(models.Log).order_by(models.Log.timestamp.desc()).limit(5).all()
+        # Recent 5 violations within window (optionally filtered by severity)
+        recent_q = in_window(db.query(models.Log))
+        if severity:
+            recent_q = recent_q.filter(models.Log.severity == severity)
+        recent_q = recent_q.order_by(models.Log.timestamp.desc()).limit(5)
         recent_list = []
-        for log in recent:
+        for log in recent_q.all():
             ts = log.timestamp
             student_name = log.student.name if log.student else "Unknown"
             recent_list.append({
@@ -176,17 +260,24 @@ def dashboard_stats():
                 "status": log.status,
             })
 
-        # Violations per day (last 7 days)
+        # Daily violations chart — last `span_days` days ending at anchor
         daily = []
-        for i in range(6, -1, -1):
-            d = today - timedelta(days=i)
+        for i in range(span_days - 1, -1, -1):
+            d = anchor - timedelta(days=i)
             d_start = datetime.combine(d, datetime.min.time())
             d_end = datetime.combine(d + timedelta(days=1), datetime.min.time())
-            count = db.query(models.Log).filter(models.Log.timestamp >= d_start, models.Log.timestamp < d_end).count()
-            daily.append({"date": d.strftime("%Y-%m-%d"), "day": d.strftime("%a"), "count": count})
+            count_q = db.query(models.Log).filter(models.Log.timestamp >= d_start, models.Log.timestamp < d_end)
+            if severity:
+                count_q = count_q.filter(models.Log.severity == severity)
+            count = count_q.count()
+            daily.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "day": d.strftime("%a") if span_days <= 7 else d.strftime("%d/%m"),
+                "count": count,
+            })
 
         return {
-            "violations_today": violations_today,
+            "violations_today": violations_in_window,
             "violations_total": violations_total,
             "total_students": total_students,
             "unresolved": unresolved,
@@ -195,6 +286,8 @@ def dashboard_stats():
             "severity_counts": severity_counts,
             "recent_violations": recent_list,
             "daily_violations": daily,
+            "range": range_type,
+            "anchor_date": anchor.strftime("%Y-%m-%d"),
         }
     finally:
         db.close()
@@ -230,11 +323,18 @@ import cv2
 # Verification code (often used for EZVIZ cameras with username 'admin'): OGXCCS
 
 # Option 1: Tapo/General RTSP with account
-#CAMERA_URL = "rtsp://mhankazis%40gmail.com:Skripsi22@192.168.137.196:554/stream1"
+#CAMERA_URL = "rtsp://mhankazis%40gmail.com:Skripsi22@192.168.1.26:554/stream1"
 
 # Option 2: Ezviz/Other cameras using Verification Code
-# Now that the camera is set to H.264, we can use the default stream path
-CAMERA_URL = "rtsp://admin:Skripsiku@192.168.137.196:554/H.264"
+# EZVIZ RTSP auth: admin password = device verification code (OGXCCS), NOT the app account password.
+#
+# Stream choice (verified via probe):
+#   /H.264                  -> main stream 2880x1616 (heavy for real-time detection)
+#   /Streaming/Channels/102 -> sub  stream 768x432   (4x lighter, ideal for live detection)
+# Using sub stream so YOLO + face recognition stay responsive when Detection ON.
+CAMERA_URL = "rtsp://admin:OGXCCS@192.168.1.26:554/Streaming/Channels/102"
+# Main stream kept as fallback (higher quality for evidence snapshots if needed)
+CAMERA_URL_MAIN = "rtsp://admin:OGXCCS@192.168.1.26:554/H.264"
 
 def create_error_frame(message):
     import numpy as np
@@ -371,6 +471,12 @@ def video_feed():
 def stop_camera():
     """Stop the camera stream and release RTSP resources."""
     camera_stream.stop()
+    # Clear any active alarm so it doesn't carry over to the next session
+    try:
+        from ezviz_alarm import acknowledge_alarm
+        acknowledge_alarm()
+    except Exception:
+        pass
     return {"message": "Camera stopped"}
 
 if __name__ == "__main__":

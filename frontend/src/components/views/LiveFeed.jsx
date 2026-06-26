@@ -13,7 +13,7 @@ export default function LiveFeed() {
     const [isConnected, setIsConnected] = useState(false)
     const imgRef = useRef(null)
     const loadingTimerRef = useRef(null)
-    const { isPlaying, acknowledge } = useAlarmSound(API_BASE)
+    const { isPlaying, acknowledge } = useAlarmSound(API_BASE, detectionMode)
 
     // Cleanup the stream when navigating away to prevent hanging requests
     useEffect(() => {
