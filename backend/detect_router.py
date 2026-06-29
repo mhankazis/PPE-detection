@@ -3,7 +3,7 @@ API Router for PPE Detection endpoints.
 Handles image upload detection, video upload detection, and live feed with YOLO overlay.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Form
 from fastapi.responses import StreamingResponse, Response
 import cv2
 import os
@@ -173,8 +173,10 @@ async def detect_video(file: UploadFile = File(...)):
     import numpy as np
     import asyncio
 
-    # Save uploaded video to temp file
-    temp_input = UPLOAD_DIR / f"tmp_in_{uuid.uuid4().hex[:8]}{Path(file.filename).suffix}"
+    # Save uploaded video to persistent file (kept for annotated re-render)
+    video_id = uuid.uuid4().hex[:8]
+    raw_suffix = Path(file.filename).suffix or ".mp4"
+    temp_input = UPLOAD_DIR / f"src_{video_id}{raw_suffix}"
     try:
         with open(temp_input, "wb") as f:
             shutil.copyfileobj(file.file, f)
@@ -182,7 +184,7 @@ async def detect_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {str(e)}")
 
     # Re-encode original video to H.264 for browser playback
-    video_filename = f"vid_{uuid.uuid4().hex[:8]}.mp4"
+    video_filename = f"vid_{video_id}.mp4"
     video_path = UPLOAD_DIR / video_filename
     _reencode_to_h264(str(temp_input), str(video_path))
 
@@ -291,7 +293,7 @@ async def detect_video(file: UploadFile = File(...)):
                 identified_persons += 1
                 identified_names.add(c.get("identified_name", f"ID:{c['identified_student_id']}"))
 
-        return {
+        result = {
             "success": True,
             "video_url": f"/.uploads/detections/{video_filename}",
             "video_dimensions": {"width": width, "height": height},
@@ -311,6 +313,24 @@ async def detect_video(file: UploadFile = File(...)):
             }
         }
 
+        # Persist detections metadata so /video-annotated can re-render with burn-in
+        try:
+            import json
+            meta_path = UPLOAD_DIR / f"{video_filename}.json"
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "video_id": video_id,
+                    "source_path": str(temp_input),
+                    "fps": fps,
+                    "width": width,
+                    "height": height,
+                    "frame_detections": frame_detections,
+                }, f)
+        except Exception as e:
+            print(f"[Detect] Failed to save video metadata: {e}")
+
+        return result
+
     try:
         # Run video processing in thread pool to avoid blocking the event loop
         result = await asyncio.to_thread(_process_video)
@@ -319,13 +339,150 @@ async def detect_video(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Video processing failed: {str(e)}")
-    finally:
-        # Clean up temp input file
-        if temp_input.exists():
-            try:
-                os.remove(temp_input)
-            except:
-                pass
+
+
+@router.post("/video-annotated")
+async def detect_video_annotated(video_filename: str = Form(...)):
+    """
+    Re-render a previously processed video with annotations (bounding boxes,
+    PPE status, identified names) burned into each frame.
+    Returns URL to annotated MP4 (H.264).
+    """
+    import json
+    import asyncio
+
+    # Resolve paths
+    base_name = Path(video_filename).name  # sanitize (e.g. vid_e8cae7f7.mp4)
+    meta_path = UPLOAD_DIR / f"{base_name}.json"
+
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Detection metadata not found. Re-upload the video.")
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read metadata: {e}")
+
+    # Source video is saved as src_{video_id}{ext} during detect_video
+    video_id = meta.get("video_id")
+    if not video_id:
+        raise HTTPException(status_code=404, detail="video_id missing from metadata.")
+
+    src_path = None
+    for candidate in UPLOAD_DIR.glob(f"src_{video_id}*"):
+        src_path = candidate
+        break
+
+    if src_path is None or not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"Source video not found for id {video_id}.")
+
+    frame_detections = meta.get("frame_detections", [])
+    fps = meta.get("fps", 25.0)
+    width = meta.get("width")
+    height = meta.get("height")
+
+    def _render():
+        cap = cv2.VideoCapture(str(src_path))
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Could not open source video")
+
+        out_name = f"ann_{Path(base_name).stem}.mp4"
+        out_path = UPLOAD_DIR / out_name
+        tmp_path = UPLOAD_DIR / f"tmp_{out_name}"
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(tmp_path), fourcc, fps, (width, height))
+        if not writer.isOpened():
+            cap.release()
+            raise HTTPException(status_code=500, detail="Failed to open video writer")
+
+        # Build frame lookup: frame_number -> detections + compliance
+        fd_map = {fd["frame"]: fd for fd in frame_detections}
+
+        # Interpolation state (carry forward last detection until next detected frame)
+        last_dets = []
+        last_compliance = []
+        frame_idx = 0
+
+        CLASS_COLORS = {
+            "Person": (255, 206, 86),     # yellow (BGR)
+            "Helmet": (74, 222, 128),     # green
+            "Uniform": (20, 184, 166),    # teal
+            "Hijab": (239, 68, 239),      # fuchsia
+            "Glasses": (0, 194, 255),     # orange-ish
+        }
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_idx += 1
+
+            fd = fd_map.get(frame_idx)
+            if fd is not None:
+                last_dets = fd.get("detections", [])
+                last_compliance = fd.get("compliance", [])
+
+            annotated = frame.copy()
+
+            # Draw detection boxes
+            for det in last_dets:
+                label = det.get("label", "")
+                x1, y1, x2, y2 = det.get("bbox", [0, 0, 0, 0])
+                color = CLASS_COLORS.get(label, (255, 255, 255))
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                # Label tag
+                tag = f"{label} {det.get('confidence', 0) * 100:.0f}%"
+                (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(annotated, (x1, max(0, y1 - th - 6)), (x1 + tw + 4, y1), color, -1)
+                cv2.putText(annotated, tag, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
+            # Draw compliance status + name per person
+            for comp in last_compliance:
+                from detection import ppe_to_id
+                x1, y1, x2, y2 = comp.get("person_bbox", [0, 0, 0, 0])
+                status_text = "APD LENGKAP" if comp.get("is_compliant") else f"KURANG: {', '.join(ppe_to_id(m) for m in comp.get('missing_ppe', []))}"
+                bg = (22, 163, 74) if comp.get("is_compliant") else (220, 38, 38)
+
+                # Status bar (below person box)
+                (stw, sth), _ = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                bar_w = stw + 12
+                bar_y = min(height - 1, y2)
+                cv2.rectangle(annotated, (x1, bar_y), (x1 + bar_w, bar_y + 22), bg, -1)
+                cv2.putText(annotated, status_text, (x1 + 6, bar_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+                # Name bar (above person box)
+                name = comp.get("identified_name")
+                if name:
+                    name_text = f"ID: {name}"
+                    (nw, nh), _ = cv2.getTextSize(name_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                    nbar_w = nw + 12
+                    nbar_y = max(0, y1 - 22)
+                    cv2.rectangle(annotated, (x1, nbar_y), (x1 + nbar_w, nbar_y + 22), (37, 99, 235), -1)
+                    cv2.putText(annotated, name_text, (x1 + 6, nbar_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+            writer.write(annotated)
+
+        cap.release()
+        writer.release()
+
+        # Re-encode to H.264 for browser compatibility
+        _reencode_to_h264(str(tmp_path), str(out_path))
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+        return {"success": True, "annotated_video_url": f"/.uploads/detections/{out_name}"}
+
+    try:
+        result = await asyncio.to_thread(_render)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Annotated render failed: {str(e)}")
 
 
 def _has_significant_motion(prev_frame, curr_frame, threshold=25, min_area_pct=0.02):
@@ -517,84 +674,124 @@ def _generate_detection_frames():
     face_id_cache = {}
     frame_interval = 1.0 / LIVE_TARGET_FPS
 
-    # --- Auto-violation logging with debounce ---
-    # Tracks last log time per (student_id, violation_type) or (bbox_hash, violation_type)
-    # to prevent spamming the database with duplicate violations.
-    VIOLATION_COOLDOWN = 60.0  # seconds — minimum time between same violation for same person
-    _violation_log_times = {}  # key: (identifier, violation_key) -> last_log_timestamp
+    # --- Auto-violation logging via ViolationLogger state machine ---
+    # Replaces flat debounce with: temporal buffer (5s persist) + known face
+    # cooldown (300s) + unknown tracker permanent lock. See violation_logger.py.
+    from violation_logger import ViolationLogger
+
     VIOLATION_LOG_DIR = Path(".uploads/logs")
     VIOLATION_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    def _log_violation(comp, annotated_img):
-        """Create a violation log entry in the database with debounce protection."""
-        import random
-        student_id = comp.get("identified_student_id")
-        missing = comp.get("missing_ppe", [])
-        violation_key = ",".join(sorted(missing))
+    class _LiveViolationLogger(ViolationLogger):
+        """ViolationLogger subclass that persists to DB + triggers siren."""
 
-        # Build identifier: use student_id if identified, else bbox hash for anonymous tracking
-        if student_id is not None:
-            identifier = f"student:{student_id}"
-        else:
-            # Hash the bbox to track anonymous persons by location
-            bbox = comp.get("person_bbox", [])
-            identifier = f"anon:{hash(tuple(bbox))}"
+        # Hard cap: minimum seconds between ANY two unknown-person logs.
+        # Prevents spam when bbox-center shifts create new pseudo-tracker IDs.
+        UNKNOWN_GLOBAL_COOLDOWN = 60.0
 
-        # Debounce check — skip if same violation was logged recently for this person
-        cache_key = (identifier, violation_key)
-        now = time.time()
-        last_log = _violation_log_times.get(cache_key, 0)
-        if now - last_log < VIOLATION_COOLDOWN:
-            return  # Cooldown not elapsed — skip
+        def __init__(self, student_names_map):
+            super().__init__()
+            self._student_names = student_names_map
+            self._last_cleanup = 0.0
+            self._last_unknown_log = 0.0  # timestamp of last unknown log
 
-        try:
-            from database import SessionLocal
-            db = SessionLocal()
-            try:
-                # Save annotated frame as evidence
-                log_number = f"V-{random.randint(1000, 9999)}"
-                img_filename = f"{log_number}_{int(now)}_{identifier.split(':')[1]}.jpg"
-                img_path = VIOLATION_LOG_DIR / img_filename
-                cv2.imwrite(str(img_path), annotated_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
-
-                # Determine severity based on missing items
-                severity = "High" if len(missing) >= 2 else "Medium" if len(missing) == 1 else "Low"
-                violation_type = f"Kurang: {', '.join(missing)}"
-
-                new_log = models.Log(
-                    log_number=log_number,
-                    violation_type=violation_type,
-                    camera_id=None,
-                    student_id=student_id,
-                    severity=severity,
-                    status="Belum Dihukum",
-                    image_path=str(img_path)
-                )
-                db.add(new_log)
-                db.commit()
-
-                # Update debounce tracker
-                _violation_log_times[cache_key] = now
-
-                # Cleanup old entries from tracker (keep last 100)
-                if len(_violation_log_times) > 100:
-                    sorted_keys = sorted(_violation_log_times.items(), key=lambda x: x[1])
-                    for k, _ in sorted_keys[:len(sorted_keys) - 100]:
-                        del _violation_log_times[k]
-
-                student_label = student_names.get(student_id, f"ID:{student_id}") if student_id else "Unknown"
-                print(f"[LiveDetect] Violation logged: {student_label} — {violation_type} ({severity})")
-
-                # Trigger EZVIZ siren if enabled
+        def _save_to_database(self, tracker_id, face_id, timestamp):
+            import random
+            # face_id format from caller: "student:<id>" or "Unknown"
+            student_id = None
+            if face_id.startswith("student:"):
                 try:
-                    from ezviz_alarm import trigger_siren
-                    trigger_siren()
-                except Exception as e:
-                    print(f"[LiveDetect] EZVIZ siren trigger skipped: {e}")
-            finally:
-                db.close()
-        except Exception as e:
-            print(f"[LiveDetect] Failed to log violation: {e}")
+                    student_id = int(face_id.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    student_id = None
+            else:
+                # Unknown person — apply global cooldown hard cap.
+                if timestamp - self._last_unknown_log < self.UNKNOWN_GLOBAL_COOLDOWN:
+                    return  # throttled — too soon since last unknown log
+                self._last_unknown_log = timestamp
+
+            try:
+                from database import SessionLocal
+                db = SessionLocal()
+                try:
+                    # Snapshot already captured by caller via set_evidence_frame
+                    img = self._evidence_frame
+                    log_number = f"V-{random.randint(1000, 9999)}"
+                    label_id = student_id if student_id is not None else tracker_id
+                    img_filename = f"{log_number}_{int(timestamp)}_{label_id}.jpg"
+                    img_path = VIOLATION_LOG_DIR / img_filename
+                    if img is not None:
+                        cv2.imwrite(str(img_path), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    else:
+                        img_path = None
+
+                    # Reconstruct missing PPE list from evidence context
+                    from detection import ppe_to_id
+                    missing = self._evidence_missing.get(tracker_id, [])
+                    missing_id = [ppe_to_id(m) for m in missing]
+                    severity = "High" if len(missing) >= 2 else "Medium" if len(missing) == 1 else "Low"
+                    violation_type = f"Kurang: {', '.join(missing_id)}" if missing_id else "PPE Violation"
+
+                    new_log = models.Log(
+                        log_number=log_number,
+                        violation_type=violation_type,
+                        camera_id=None,
+                        student_id=student_id,
+                        severity=severity,
+                        status="Belum Dihukum",
+                        image_path=str(img_path) if img_path else None,
+                    )
+                    db.add(new_log)
+                    db.commit()
+
+                    student_label = (
+                        self._student_names.get(student_id, f"ID:{student_id}")
+                        if student_id else "Unknown"
+                    )
+                    print(f"[LiveDetect] Violation logged: {student_label} — {violation_type} ({severity})")
+
+                    # Trigger EZVIZ siren if enabled
+                    try:
+                        from ezviz_alarm import trigger_siren
+                        trigger_siren()
+                    except Exception as e:
+                        print(f"[LiveDetect] EZVIZ siren trigger skipped: {e}")
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"[LiveDetect] Failed to log violation: {e}")
+
+    violation_state = _LiveViolationLogger(student_names)
+    # Stash latest annotated frame + per-tracker missing PPE for the save hook
+    violation_state._evidence_frame = None
+    violation_state._evidence_missing = {}
+
+    def _log_violation(comp, annotated_img):
+        """Feed one observation through the ViolationLogger state machine."""
+        student_id = comp.get("identified_student_id")
+        px1, py1, px2, py2 = comp["person_bbox"]
+        # Stable pseudo-tracker from quantized bbox center (same scheme as
+        # face_id_cache above). Persists while person stays in same spot.
+        cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
+        tracker_id = (cx // 40) * 100000 + (cy // 40)
+
+        face_id = f"student:{student_id}" if student_id is not None else "Unknown"
+
+        # Remember missing PPE list so _save_to_database can rebuild message
+        violation_state._evidence_missing[tracker_id] = comp.get("missing_ppe", [])
+        violation_state._evidence_frame = annotated_img
+
+        violation_state.process(
+            tracker_id=tracker_id,
+            face_id=face_id,
+            is_violating=not comp["is_compliant"],
+        )
+
+        # Periodic cleanup once per minute
+        now = time.time()
+        if now - violation_state._last_cleanup > 60:
+            violation_state._last_cleanup = now
+            violation_state.cleanup(now)
 
     while True:
         loop_start = time.time()

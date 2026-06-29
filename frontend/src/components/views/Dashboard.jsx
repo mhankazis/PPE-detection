@@ -152,8 +152,7 @@ export default function Dashboard() {
                         <Calendar className="w-4 h-4 text-muted-foreground" />
                         <input
                             type="date"
-                            className="bg-transparent outline-none cursor-pointer text-sm pr-1"
-                            style={{ colorScheme: 'light dark' }}
+                            className="bg-transparent outline-none cursor-pointer text-sm pr-1 [color-scheme:light] dark:[color-scheme:dark]"
                             value={anchorDate}
                             onChange={(e) => {
                                 setAnchorDate(e.target.value)

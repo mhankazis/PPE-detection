@@ -495,123 +495,123 @@ export default function Logs() {
 
             <Card>
                 <CardHeader className="py-4 border-b bg-muted/50 flex flex-col gap-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center justify-between gap-4">
                         <CardTitle className="text-lg">Catatan Terbaru</CardTitle>
-                        <div className="flex flex-col sm:flex-row gap-3">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm text-muted-foreground whitespace-nowrap">Tampilkan</span>
-                                <select
-                                    className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                    value={itemsPerPage}
-                                    onChange={(e) => {
-                                        setItemsPerPage(Number(e.target.value));
-                                        setCurrentPage(1);
-                                    }}
-                                >
-                                    <option value={10}>10</option>
-                                    <option value={25}>25</option>
-                                    <option value={50}>50</option>
-                                </select>
-                                <span className="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline-block">entri</span>
-                            </div>
-                            <div className="relative">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                <input
-                                    type="text"
-                                    placeholder="Cari log..."
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pl-9 sm:w-[200px]"
-                                    value={searchTerm}
-                                    onChange={(e) => {
-                                        setSearchTerm(e.target.value);
-                                        setCurrentPage(1);
-                                    }}
-                                />
-                            </div>
-                            <div className="relative relative-filter-dropdown">
-                                <Button
-                                    variant="outline"
-                                    className="gap-2 h-9"
-                                    onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-                                >
-                                    <Filter className="w-4 h-4" /> Filter
-                                    {selectedTypes.length > 0 && (
-                                        <Badge variant="secondary" className="ml-1 h-5 px-1">{selectedTypes.length}</Badge>
-                                    )}
-                                </Button>
-                                {isFilterDropdownOpen && (
-                                    <div className="absolute top-full left-0 mt-2 z-50 w-64 bg-background border rounded-md shadow-md p-3">
-                                        <div className="font-medium text-sm mb-2">Filter Jenis</div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {availableViolations.map(vtype => {
-                                                const isSelected = selectedTypes.includes(vtype);
-                                                return (
-                                                    <Badge
-                                                        key={vtype}
-                                                        variant={isSelected ? "default" : "outline"}
-                                                        className={"cursor-pointer transition-colors " + (isSelected ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-accent hover:text-accent-foreground")}
-                                                        onClick={() => {
-                                                            if (selectedTypes.includes(vtype)) {
-                                                                setSelectedTypes(selectedTypes.filter(t => t !== vtype));
-                                                            } else {
-                                                                setSelectedTypes([...selectedTypes, vtype]);
-                                                            }
-                                                            setCurrentPage(1);
-                                                        }}
-                                                    >
-                                                        {vtype}
-                                                    </Badge>
-                                                )
-                                            })}
-                                        </div>
-                                        {selectedTypes.length > 0 && (
-                                            <div className="mt-3 pt-3 border-t">
-                                                <Button variant="ghost" size="sm" className="w-full text-xs h-7" onClick={() => { setSelectedTypes([]); setCurrentPage(1); setIsFilterDropdownOpen(false); }}>
-                                                    Hapus Filter
-                                                </Button>
-                                            </div>
-                                        )}
-                                    </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground whitespace-nowrap">Tampilkan</span>
+                            <select
+                                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                value={itemsPerPage}
+                                onChange={(e) => {
+                                    setItemsPerPage(Number(e.target.value));
+                                    setCurrentPage(1);
+                                }}
+                            >
+                                <option value={10}>10</option>
+                                <option value={25}>25</option>
+                                <option value={50}>50</option>
+                            </select>
+                            <span className="text-sm text-muted-foreground whitespace-nowrap hidden sm:inline-block">entri</span>
+                        </div>
+                        <div className="relative flex-1 min-w-[180px] sm:max-w-[240px]">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <input
+                                type="text"
+                                placeholder="Cari log..."
+                                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pl-9"
+                                value={searchTerm}
+                                onChange={(e) => {
+                                    setSearchTerm(e.target.value);
+                                    setCurrentPage(1);
+                                }}
+                            />
+                        </div>
+                        <div className="relative relative-filter-dropdown">
+                            <Button
+                                variant="outline"
+                                className="gap-2 h-9"
+                                onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
+                            >
+                                <Filter className="w-4 h-4" /> Filter
+                                {selectedTypes.length > 0 && (
+                                    <Badge variant="secondary" className="ml-1 h-5 px-1">{selectedTypes.length}</Badge>
                                 )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Calendar className="h-4 w-4 text-muted-foreground hidden sm:block" />
-                                <input
-                                    type="date"
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                    value={dateFrom}
-                                    onChange={(e) => setDateFrom(e.target.value)}
-                                />
-                                <span className="text-muted-foreground">-</span>
-                                <input
-                                    type="date"
-                                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                    value={dateTo}
-                                    onChange={(e) => setDateTo(e.target.value)}
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button className="gap-2" onClick={handleExportCSV}>
-                                    <Download className="w-4 h-4" /> Ekspor CSV
-                                </Button>
+                            </Button>
+                            {isFilterDropdownOpen && (
+                                <div className="absolute top-full left-0 mt-2 z-50 w-64 bg-background border rounded-md shadow-md p-3">
+                                    <div className="font-medium text-sm mb-2">Filter Jenis</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {availableViolations.map(vtype => {
+                                            const isSelected = selectedTypes.includes(vtype);
+                                            return (
+                                                <Badge
+                                                    key={vtype}
+                                                    variant={isSelected ? "default" : "outline"}
+                                                    className={"cursor-pointer transition-colors " + (isSelected ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-accent hover:text-accent-foreground")}
+                                                    onClick={() => {
+                                                        if (selectedTypes.includes(vtype)) {
+                                                            setSelectedTypes(selectedTypes.filter(t => t !== vtype));
+                                                        } else {
+                                                            setSelectedTypes([...selectedTypes, vtype]);
+                                                        }
+                                                        setCurrentPage(1);
+                                                    }}
+                                                >
+                                                    {vtype}
+                                                </Badge>
+                                            )
+                                        })}
+                                    </div>
+                                    {selectedTypes.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t">
+                                            <Button variant="ghost" size="sm" className="w-full text-xs h-7" onClick={() => { setSelectedTypes([]); setCurrentPage(1); setIsFilterDropdownOpen(false); }}>
+                                                Hapus Filter
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-muted-foreground hidden sm:block" />
+                            <input
+                                type="date"
+                                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [color-scheme:light] dark:[color-scheme:dark]"
+                                value={dateFrom}
+                                onChange={(e) => setDateFrom(e.target.value)}
+                            />
+                            <span className="text-muted-foreground">-</span>
+                            <input
+                                type="date"
+                                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 [color-scheme:light] dark:[color-scheme:dark]"
+                                value={dateTo}
+                                onChange={(e) => setDateTo(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 sm:ml-auto">
+                            <Button variant="outline" className="gap-2 h-9" onClick={handleExportCSV}>
+                                <Download className="w-4 h-4" /> Ekspor CSV
+                            </Button>
 
-                                <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-                                    <DialogTrigger asChild>
-                                        <Button className="gap-2" variant="default" onClick={handleAdd}>
-                                            <Plus className="w-4 h-4" /> Tambah Log
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="sm:max-w-[425px]">
-                                        <DialogHeader>
-                                            <DialogTitle>Tambah Log Pelanggaran Baru</DialogTitle>
-                                        </DialogHeader>
-                                        {renderForm()}
-                                        <DialogFooter>
-                                            <Button variant="outline" onClick={() => setIsAddOpen(false)}>Batal</Button>
-                                            <Button onClick={handleSaveAdd}>Simpan</Button>
-                                        </DialogFooter>
-                                    </DialogContent>
-                                </Dialog>
-                            </div>
+                            <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+                                <DialogTrigger asChild>
+                                    <Button className="gap-2 h-9" variant="default" onClick={handleAdd}>
+                                        <Plus className="w-4 h-4" /> Tambah Log
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="sm:max-w-[425px]">
+                                    <DialogHeader>
+                                        <DialogTitle>Tambah Log Pelanggaran Baru</DialogTitle>
+                                    </DialogHeader>
+                                    {renderForm()}
+                                    <DialogFooter>
+                                        <Button variant="outline" onClick={() => setIsAddOpen(false)}>Batal</Button>
+                                        <Button onClick={handleSaveAdd}>Simpan</Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
                         </div>
                     </div>
                 </CardHeader>

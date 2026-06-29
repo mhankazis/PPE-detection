@@ -332,9 +332,9 @@ import cv2
 #   /H.264                  -> main stream 2880x1616 (heavy for real-time detection)
 #   /Streaming/Channels/102 -> sub  stream 768x432   (4x lighter, ideal for live detection)
 # Using sub stream so YOLO + face recognition stay responsive when Detection ON.
-CAMERA_URL = "rtsp://admin:OGXCCS@192.168.1.26:554/Streaming/Channels/102"
+CAMERA_URL = "rtsp://admin:OGXCCS@192.168.137.202:554/Streaming/Channels/102"
 # Main stream kept as fallback (higher quality for evidence snapshots if needed)
-CAMERA_URL_MAIN = "rtsp://admin:OGXCCS@192.168.1.26:554/H.264"
+CAMERA_URL_MAIN = "rtsp://admin:OGXCCS@192.168.137.202:554/H.264"
 
 def create_error_frame(message):
     import numpy as np

@@ -38,6 +38,20 @@ CLASS_COLORS = {
 # Required PPE items (must be present for compliance)
 REQUIRED_PPE = {"Helmet", "Uniform"}
 
+# English (model class) → Indonesian (UI/DB) translation.
+# Keeps bbox labels and DB violation_type consistent with frontend Logs view.
+PPE_TO_ID = {
+    "Helmet":  "Helm",
+    "Uniform": "Seragam",
+    "Hijab":   "Hijab",
+    "Glasses": "Kacamata",
+}
+
+
+def ppe_to_id(label: str) -> str:
+    """Translate a PPE class label to Indonesian. Falls back to original."""
+    return PPE_TO_ID.get(label, label)
+
 # Informational PPE items (reported if detected, not flagged if missing)
 INFORMATIONAL_PPE = {"Hijab", "Glasses"}
 
@@ -378,8 +392,8 @@ class PPEDetector:
             # Draw box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
-            # Label with background
-            text = f"{label} {conf:.0%}"
+            # Label with background (translated to Indonesian)
+            text = f"{ppe_to_id(label)} {conf:.0%}"
             (tw, th), _ = cv2.getTextSize(text, font, font_scale, text_thickness)
             cv2.rectangle(frame, (x1, y1 - th - padding - 2), (x1 + tw + padding, y1), color, -1)
             cv2.putText(frame, text, (x1 + padding // 2, y1 - padding // 2), font, font_scale, (255, 255, 255), text_thickness, cv2.LINE_AA)
@@ -392,7 +406,7 @@ class PPEDetector:
                 status_text = "APD LENGKAP"
                 status_color = (0, 200, 0)  # Green
             else:
-                missing = ", ".join(comp["missing_ppe"])
+                missing = ", ".join(ppe_to_id(m) for m in comp["missing_ppe"])
                 status_text = f"KURANG: {missing}"
                 status_color = (0, 0, 255)  # Red
 
