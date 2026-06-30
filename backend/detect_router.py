@@ -286,9 +286,10 @@ async def detect_video(file: UploadFile = File(...)):
         all_missing = set()
         identified_persons = 0
         identified_names = set()
+        from detection import ppe_to_id
         for c in all_compliance:
             for m in c.get("missing_ppe", []):
-                all_missing.add(m)
+                all_missing.add(ppe_to_id(m))
             if c.get("identified_student_id") is not None:
                 identified_persons += 1
                 identified_names.add(c.get("identified_name", f"ID:{c['identified_student_id']}"))
@@ -686,8 +687,9 @@ def _generate_detection_frames():
         """ViolationLogger subclass that persists to DB + triggers siren."""
 
         # Hard cap: minimum seconds between ANY two unknown-person logs.
-        # Prevents spam when bbox-center shifts create new pseudo-tracker IDs.
-        UNKNOWN_GLOBAL_COOLDOWN = 60.0
+        # Prevents spam when tracker ID changes (person leaves/re-enters frame,
+        # brief occlusion, detection miss). 5 min = same as known-face cooldown.
+        UNKNOWN_GLOBAL_COOLDOWN = 300.0
 
         def __init__(self, student_names_map):
             super().__init__()
@@ -769,11 +771,13 @@ def _generate_detection_frames():
     def _log_violation(comp, annotated_img):
         """Feed one observation through the ViolationLogger state machine."""
         student_id = comp.get("identified_student_id")
-        px1, py1, px2, py2 = comp["person_bbox"]
-        # Stable pseudo-tracker from quantized bbox center (same scheme as
-        # face_id_cache above). Persists while person stays in same spot.
-        cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
-        tracker_id = (cx // 40) * 100000 + (cy // 40)
+        # Prefer real ByteTrack ID; fall back to bbox-center pseudo-tracker
+        # if tracker lost this person (box.id None on first frame / occlusion).
+        tracker_id = comp.get("tracker_id")
+        if tracker_id is None:
+            px1, py1, px2, py2 = comp["person_bbox"]
+            cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
+            tracker_id = (cx // 40) * 100000 + (cy // 40)
 
         face_id = f"student:{student_id}" if student_id is not None else "Unknown"
 
@@ -813,9 +817,9 @@ def _generate_detection_frames():
                 last_frame_id = frame_id
                 last_detect_time = now
                 try:
-                    # Run YOLO directly on raw frame — YOLO handles internal resizing (imgsz=640)
-                    # No manual downscale needed; YOLO's internal resize is optimized
-                    _, detections, compliance = detector.detect_frame(raw_frame, annotate=False)
+                    # Run YOLO with ByteTrack tracking — assigns stable tracker_id
+                    # per person across frames (replaces bbox-center pseudo-tracker).
+                    _, detections, compliance = detector.detect_frame_tracked(raw_frame, annotate=False)
                     last_detections = detections
                     last_compliance = compliance
 
@@ -837,9 +841,15 @@ def _generate_detection_frames():
 
                     for comp in compliance:
                         px1, py1, px2, py2 = comp["person_bbox"]
-                        # Stable key from bbox center (quantized) — survives minor jitter
-                        cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
-                        bbox_key = (cx // 40, cy // 40)
+                        # Cache key: prefer real ByteTrack tracker_id (stable across
+                        # movement); fall back to quantized bbox center if tracker
+                        # lost this person (first frame / brief occlusion).
+                        tracker_id = comp.get("tracker_id")
+                        if tracker_id is not None:
+                            bbox_key = ("tid", tracker_id)
+                        else:
+                            cx, cy = (px1 + px2) // 2, (py1 + py2) // 2
+                            bbox_key = (cx // 40, cy // 40)
 
                         student_id = None
                         if run_face_rec:
@@ -873,6 +883,13 @@ def _generate_detection_frames():
                     for comp in compliance:
                         if not comp["is_compliant"]:
                             _log_violation(comp, annotated_frame)
+
+                    # Release violation state for trackers that disappeared this
+                    # cycle (person left frame). Frees the permanent lock so the
+                    # tracker ID can be safely reused by ByteTrack later.
+                    for tid in getattr(detector, "_last_disappeared_trackers", ()):
+                        violation_state.forget_tracker(tid)
+                    detector._last_disappeared_trackers = set()
 
                     last_annotated_frame = annotated_frame
                 except Exception as e:

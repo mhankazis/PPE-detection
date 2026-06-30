@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react"
-import { Upload, FileVideo, X, Play, Info, CheckCircle2, AlertTriangle, Shield, ShieldAlert, Loader2, Clock, Users, BarChart3, Filter, Zap, Download } from "lucide-react"
+import { Upload, FileVideo, X, Play, Info, CheckCircle2, AlertTriangle, Shield, ShieldAlert, Loader2, Clock, Users, BarChart3, Filter, Zap, Download, Camera, Check, Trash2, Send } from "lucide-react"
 
 const API_BASE = "http://localhost:8000"
 
@@ -21,6 +21,16 @@ const CLASS_DRAW_COLORS = {
     Glasses: '#eab308',
 }
 
+// English (backend) → Indonesian (UI) translation for PPE labels.
+const PPE_TO_ID = {
+    Helmet: 'Helm',
+    Uniform: 'Seragam',
+    Hijab: 'Hijab',
+    Glasses: 'Kacamata',
+    Person: 'Orang',
+}
+const ppeToId = (label) => PPE_TO_ID[label] || label
+
 export default function VideoUploadContent() {
     const [selectedVideo, setSelectedVideo] = useState(null)
     const [previewUrl, setPreviewUrl] = useState(null)
@@ -33,6 +43,11 @@ export default function VideoUploadContent() {
     const [currentFrameData, setCurrentFrameData] = useState(null)
     const [isRendering, setIsRendering] = useState(false)
     const [downloadError, setDownloadError] = useState(null)
+    const [capturedFrames, setCapturedFrames] = useState([])
+    const [isCapturing, setIsCapturing] = useState(false)
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [submitStatus, setSubmitStatus] = useState(null)
+    const [videoPaused, setVideoPaused] = useState(false)
     const fileInputRef = useRef(null)
     const videoRef = useRef(null)
     const canvasRef = useRef(null)
@@ -89,6 +104,166 @@ export default function VideoUploadContent() {
             setDownloadError(e.message || 'Gagal membuat video annotated')
         } finally {
             setIsRendering(false)
+        }
+    }
+
+    // === Capture current video frame + canvas overlay as evidence image ===
+    const captureCurrentFrame = useCallback(async () => {
+        const video = videoRef.current
+        if (!video || !results || !currentFrameData) return
+
+        if (!video.paused) {
+            setError('Pause video di frame pelanggaran terlebih dahulu.')
+            return
+        }
+
+        setIsCapturing(true)
+        setError(null)
+        try {
+            const vidW = results.video_dimensions?.width || video.videoWidth
+            const vidH = results.video_dimensions?.height || video.videoHeight
+            if (!vidW || !vidH) throw new Error('Video dimensions not available')
+
+            const captureCanvas = document.createElement('canvas')
+            captureCanvas.width = vidW
+            captureCanvas.height = vidH
+            const ctx = captureCanvas.getContext('2d')
+
+            ctx.drawImage(video, 0, 0, vidW, vidH)
+
+            for (const det of currentFrameData.detections) {
+                if (!activeFilters.has(det.label)) continue
+                const [x1, y1, x2, y2] = det.bbox
+                const color = CLASS_DRAW_COLORS[det.label] || '#ffffff'
+                ctx.strokeStyle = color
+                ctx.lineWidth = 3
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+
+                const text = `${ppeToId(det.label)} ${(det.confidence * 100).toFixed(0)}%`
+                ctx.font = 'bold 16px Inter, system-ui, sans-serif'
+                const tm = ctx.measureText(text)
+                ctx.fillStyle = color
+                ctx.fillRect(x1, y1 - 22, tm.width + 12, 22)
+                ctx.fillStyle = '#ffffff'
+                ctx.fillText(text, x1 + 6, y1 - 6)
+            }
+
+            if (currentFrameData.compliance) {
+                for (const comp of currentFrameData.compliance) {
+                    if (comp.is_compliant) continue
+                    const [x1, , , y2] = comp.person_bbox
+                    const missing = comp.missing_ppe.map(ppeToId).join(', ')
+                    const statusText = `KURANG: ${missing}`
+                    const nameText = comp.identified_name || null
+
+                    ctx.font = 'bold 16px Inter, system-ui, sans-serif'
+                    const tm = ctx.measureText(statusText)
+                    const nameTm = nameText ? ctx.measureText(nameText) : { width: 0 }
+                    const barW = Math.max(tm.width + 16, nameTm.width + 16)
+                    const barH = 26
+                    const nameBarH = nameText ? 22 : 0
+
+                    ctx.fillStyle = '#dc2626'
+                    ctx.globalAlpha = 0.92
+                    ctx.fillRect(x1, y2, barW, barH)
+                    ctx.globalAlpha = 1.0
+                    ctx.fillStyle = '#ffffff'
+                    ctx.fillText(statusText, x1 + 8, y2 + barH - 8)
+
+                    if (nameText) {
+                        ctx.fillStyle = '#2563eb'
+                        ctx.globalAlpha = 0.95
+                        ctx.fillRect(x1, y2 - nameBarH, barW, nameBarH)
+                        ctx.globalAlpha = 1.0
+                        ctx.fillStyle = '#ffffff'
+                        ctx.fillText(nameText, x1 + 8, y2 - 6)
+                    }
+                }
+            }
+
+            const blob = await new Promise((resolve) => {
+                captureCanvas.toBlob(resolve, 'image/jpeg', 0.92)
+            })
+            if (!blob) throw new Error('Failed to capture frame')
+
+            const frameRecord = {
+                id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                blob,
+                url: URL.createObjectURL(blob),
+                timestamp: video.currentTime,
+                frame_index: currentFrameData.frame_index,
+                compliance: currentFrameData.compliance,
+                detections: currentFrameData.detections,
+                violation_count: currentFrameData.compliance
+                    ? currentFrameData.compliance.filter(c => !c.is_compliant).length
+                    : 0,
+            }
+            setCapturedFrames(prev => [...prev, frameRecord])
+        } catch (e) {
+            setError(e.message || 'Gagal capture frame')
+        } finally {
+            setIsCapturing(false)
+        }
+    }, [results, currentFrameData, activeFilters])
+
+    const removeCapturedFrame = (id) => {
+        setCapturedFrames(prev => {
+            const target = prev.find(f => f.id === id)
+            if (target) URL.revokeObjectURL(target.url)
+            return prev.filter(f => f.id !== id)
+        })
+    }
+
+    // === Submit captured frames as violation logs to backend ===
+    const submitViolations = async (frameRecord) => {
+        const frames = frameRecord ? [frameRecord] : capturedFrames
+        if (frames.length === 0) return
+
+        setIsSubmitting(true)
+        setSubmitStatus(null)
+        let success = 0
+        let failed = 0
+
+        for (const frame of frames) {
+            const violations = (frame.compliance || []).filter(c => !c.is_compliant)
+            if (violations.length === 0) {
+                failed += 1
+                continue
+            }
+            for (const comp of violations) {
+                try {
+                    const missing = comp.missing_ppe.map(ppeToId).join(', ')
+                    const severity = comp.missing_ppe.length >= 2 ? 'High' : 'Medium'
+
+                    const formData = new FormData()
+                    formData.append('violation_type', `Kurang: ${missing}`)
+                    formData.append('severity', severity)
+                    formData.append('student_id', comp.identified_student_id != null ? String(comp.identified_student_id) : '')
+                    formData.append('camera_id', '')
+                    formData.append('file', frame.blob, `evidence_${frame.frame_index}_${Date.now()}.jpg`)
+
+                    const res = await fetch(`${API_BASE}/api/logs`, {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}))
+                        throw new Error(err.detail || `HTTP ${res.status}`)
+                    }
+                    success += 1
+                } catch (e) {
+                    console.error('Submit violation failed:', e)
+                    failed += 1
+                }
+            }
+        }
+
+        setIsSubmitting(false)
+        setSubmitStatus({ success, failed })
+
+        if (!frameRecord && failed === 0) {
+            capturedFrames.forEach(f => URL.revokeObjectURL(f.url))
+            setCapturedFrames([])
         }
     }
 
@@ -155,7 +330,7 @@ export default function VideoUploadContent() {
             ctx.lineWidth = 2.5
             ctx.strokeRect(sx, sy, sw, sh)
 
-            const text = `${det.label} ${(det.confidence * 100).toFixed(0)}%`
+            const text = `${ppeToId(det.label)} ${(det.confidence * 100).toFixed(0)}%`
             ctx.font = 'bold 12px Inter, system-ui, sans-serif'
             const tm = ctx.measureText(text)
             const labelH = 20
@@ -174,7 +349,7 @@ export default function VideoUploadContent() {
 
                 const statusText = comp.is_compliant
                     ? '✓ APD LENGKAP'
-                    : `✗ KURANG: ${comp.missing_ppe.join(', ')}`
+                    : `✗ KURANG: ${comp.missing_ppe.map(ppeToId).join(', ')}`
 
                 const nameText = comp.identified_name ? `👤 ${comp.identified_name}` : null
                 ctx.font = 'bold 11px Inter, system-ui, sans-serif'
@@ -233,6 +408,7 @@ export default function VideoUploadContent() {
         const onTimeUpdate = () => syncCanvas()
         const onSeeked = () => syncCanvas()
         const onPlay = () => {
+            setVideoPaused(false)
             const loop = () => {
                 if (!video.paused && !video.ended) {
                     syncCanvas()
@@ -246,6 +422,7 @@ export default function VideoUploadContent() {
                 cancelAnimationFrame(animFrameRef.current)
             }
             syncCanvas()
+            setVideoPaused(true)
         }
         const onLoadedData = () => syncCanvas()
 
@@ -422,6 +599,7 @@ export default function VideoUploadContent() {
                                         <video
                                             ref={videoRef}
                                             src={videoSrc}
+                                            crossOrigin="anonymous"
                                             controls
                                             className="max-h-[500px] w-auto shadow-sm block"
                                         />
@@ -460,6 +638,95 @@ export default function VideoUploadContent() {
                                     </div>
                                 </div>
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Capture Frame Button — muncul saat video sudah dianalisis + di-pause */}
+                {results && videoPaused && currentFrameData && (
+                    <div className="flex items-center gap-3 p-3 rounded-xl border bg-primary/5">
+                        <Camera className="w-5 h-5 text-primary shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">Capture Frame sebagai Bukti</p>
+                            <p className="text-xs text-muted-foreground">
+                                {currentFrameData.compliance
+                                    ? `${currentFrameData.compliance.filter(c => !c.is_compliant).length} pelanggaran terdeteksi di frame ini`
+                                    : 'Tidak ada data compliance'}
+                            </p>
+                        </div>
+                        <button
+                            onClick={captureCurrentFrame}
+                            disabled={isCapturing}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+                        >
+                            {isCapturing ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Camera className="w-4 h-4" />
+                            )}
+                            {isCapturing ? 'Capturing...' : 'Capture'}
+                        </button>
+                    </div>
+                )}
+
+                {/* Evidence Gallery */}
+                {capturedFrames.length > 0 && (
+                    <div className="space-y-3 p-4 rounded-xl border bg-muted/30">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold flex items-center gap-2">
+                                <Camera className="w-4 h-4 text-primary" />
+                                Bukti Pelanggaran ({capturedFrames.length})
+                            </h3>
+                            <button
+                                onClick={() => submitViolations()}
+                                disabled={isSubmitting}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                {isSubmitting ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <Send className="w-3.5 h-3.5" />
+                                )}
+                                {isSubmitting ? 'Submitting...' : `Submit Semua (${capturedFrames.length})`}
+                            </button>
+                        </div>
+
+                        {submitStatus && (
+                            <div className={`text-xs p-2 rounded-lg ${submitStatus.failed > 0 ? 'bg-amber-500/10 text-amber-700' : 'bg-green-500/10 text-green-700'}`}>
+                                {submitStatus.success} pelanggaran berhasil dicatat
+                                {submitStatus.failed > 0 && `, ${submitStatus.failed} gagal`}
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {capturedFrames.map((frame) => (
+                                <div key={frame.id} className="relative group rounded-lg overflow-hidden border bg-black">
+                                    <img
+                                        src={frame.url}
+                                        alt={`Frame ${frame.frame_index}`}
+                                        className="w-full h-24 object-cover"
+                                    />
+                                    <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[10px] px-2 py-1 flex justify-between">
+                                        <span>{formatDuration(frame.timestamp)}</span>
+                                        <span className="text-red-400 font-medium">{frame.violation_count} pelanggaran</span>
+                                    </div>
+                                    <button
+                                        onClick={() => submitViolations(frame)}
+                                        disabled={isSubmitting}
+                                        className="absolute top-1 right-1 p-1 bg-green-600 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                                        title="Submit frame ini"
+                                    >
+                                        <Check className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                        onClick={() => removeCapturedFrame(frame.id)}
+                                        className="absolute top-1 left-1 p-1 bg-red-600 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Hapus"
+                                    >
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
@@ -693,7 +960,7 @@ export default function VideoUploadContent() {
                                                 >
                                                     <span className="flex items-center gap-2 font-medium">
                                                         <span className={`w-2 h-2 rounded-full ${CLASS_BADGE_COLORS[det.label] || 'bg-gray-400'}`} />
-                                                        {det.label}
+                                                        {ppeToId(det.label)}
                                                     </span>
                                                     <span className="text-muted-foreground font-mono text-xs">
                                                         {(det.confidence * 100).toFixed(1)}%

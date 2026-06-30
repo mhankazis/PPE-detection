@@ -77,6 +77,10 @@ class PPEDetector:
         self._initialized = True
         self.model = None
         self.confidence = CONFIDENCE_THRESHOLD
+        # ByteTrack state — persists across frames for stable person IDs.
+        # Lazily activated on first detect_frame_tracked() call.
+        self._tracker_enabled = False
+        self._last_tracker_ids: set[int] = set()
         self._load_model()
 
     def _load_model(self):
@@ -206,6 +210,89 @@ class PPEDetector:
         # Draw annotations on frame (skip if annotate=False)
         annotated_frame = self._draw_annotations(frame.copy(), detections, compliance) if annotate else frame
 
+        return annotated_frame, detections, compliance
+
+    def detect_frame_tracked(self, frame: np.ndarray, annotate: bool = True) -> tuple:
+        """
+        Run detection WITH ByteTrack tracking — assigns stable tracker_id
+        per person across frames. Same return contract as detect_frame, but
+        each compliance dict gains a 'tracker_id' field (int or None).
+
+        Uses Ultralytics model.track() which runs ByteTrack internally.
+        Adds ~2-5ms overhead vs detect_frame — negligible vs YOLO inference.
+
+        Args:
+            frame: Input BGR image
+            annotate: If False, skip drawing annotations
+
+        Returns:
+            annotated_frame, detections, compliance (with tracker_id per person)
+        """
+        # model.track() persists tracker state internally across calls.
+        # First call initializes ByteTrack; subsequent calls update tracks.
+        results = self.model.track(
+            frame, conf=self.confidence, iou=self.NMS_IOU_THRESHOLD,
+            imgsz=self.INFERENCE_SIZE, verbose=False, device=self.device,
+            tracker="bytetrack.yaml", persist=True,
+        )
+        result = results[0]
+
+        raw_detections = []
+        person_tracker_ids = {}  # idx in raw_detections -> tracker_id (Person only)
+
+        for idx, box in enumerate(result.boxes):
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = float(box.conf[0])
+            cls_id = int(box.cls[0])
+            label = self.model.names[cls_id].title()
+
+            det = {
+                "label": label,
+                "confidence": round(conf, 3),
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+            }
+            raw_detections.append(det)
+
+            # box.id only present when tracking is active and ID assigned.
+            # Person boxes get tracker_id; PPE items do not (we only track persons).
+            if label == "Person" and box.id is not None:
+                person_tracker_ids[idx] = int(box.id.item())
+
+        # Deduplicate (same as detect_frame)
+        detections = self._deduplicate(raw_detections)
+
+        # Build a lookup from bbox → tracker_id (since dedup may reorder).
+        # bbox tuple is unique per detection.
+        bbox_to_tid = {}
+        for idx, tid in person_tracker_ids.items():
+            if idx < len(raw_detections):
+                bbox_to_tid[tuple(raw_detections[idx]["bbox"])] = tid
+
+        persons = []
+        ppe_items = []
+        for det in detections:
+            if det["label"] == "Person":
+                persons.append(det)
+            else:
+                ppe_items.append(det)
+
+        compliance = self._check_compliance(persons, ppe_items)
+
+        # Attach tracker_id to each person's compliance entry.
+        current_ids = set()
+        for comp in compliance:
+            tid = bbox_to_tid.get(tuple(comp["person_bbox"]))
+            comp["tracker_id"] = tid
+            if tid is not None:
+                current_ids.add(tid)
+
+        # Detect disappeared trackers → notify caller via attribute.
+        # (caller can use this to call violation_state.forget_tracker)
+        disappeared = self._last_tracker_ids - current_ids
+        self._last_disappeared_trackers = disappeared
+        self._last_tracker_ids = current_ids
+
+        annotated_frame = self._draw_annotations(frame.copy(), detections, compliance) if annotate else frame
         return annotated_frame, detections, compliance
 
     def _deduplicate(self, detections: list, iou_threshold: float = 0.5) -> list:

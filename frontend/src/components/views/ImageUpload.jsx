@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react"
-import { Upload, Image as ImageIcon, X, ZoomIn, Info, CheckCircle2, AlertTriangle, Shield, ShieldAlert, RotateCcw, Filter } from "lucide-react"
+import { Upload, Image as ImageIcon, X, ZoomIn, Info, CheckCircle2, AlertTriangle, Shield, ShieldAlert, RotateCcw, Filter, Send, Loader2 } from "lucide-react"
 
 const API_BASE = "http://localhost:8000"
 
@@ -23,6 +23,16 @@ const CLASS_DRAW_COLORS = {
     Glasses: '#eab308',
 }
 
+// English (backend) → Indonesian (UI) translation for PPE labels.
+const PPE_TO_ID = {
+    Helmet: 'Helm',
+    Uniform: 'Seragam',
+    Hijab: 'Hijab',
+    Glasses: 'Kacamata',
+    Person: 'Orang',
+}
+const ppeToId = (label) => PPE_TO_ID[label] || label
+
 export default function ImageUploadContent() {
     const [selectedImage, setSelectedImage] = useState(null)
     const [previewUrl, setPreviewUrl] = useState(null)
@@ -31,6 +41,8 @@ export default function ImageUploadContent() {
     const [results, setResults] = useState(null)
     const [error, setError] = useState(null)
     const [activeFilters, setActiveFilters] = useState(new Set(ALL_CLASSES))
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const [submitStatus, setSubmitStatus] = useState(null)
     const fileInputRef = useRef(null)
     const imageRef = useRef(null)
     const canvasRef = useRef(null)
@@ -66,6 +78,60 @@ export default function ImageUploadContent() {
         if (!results || !activeFilters.has('Person')) return []
         return results.compliance
     }, [results, activeFilters])
+
+    // === Submit image violations to backend ===
+    const submitImageViolations = async () => {
+        if (!results || !results.compliance) return
+        const violations = results.compliance.filter(c => !c.is_compliant)
+        if (violations.length === 0) return
+
+        setIsSubmitting(true)
+        setSubmitStatus(null)
+        let success = 0
+        let failed = 0
+
+        // Fetch annotated image from backend, convert to blob
+        let blob
+        try {
+            const imgRes = await fetch(`${API_BASE}${results.annotated_image_url}`)
+            if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`)
+            blob = await imgRes.blob()
+        } catch (e) {
+            setSubmitStatus({ success: 0, failed: violations.length, error: e.message })
+            setIsSubmitting(false)
+            return
+        }
+
+        for (const comp of violations) {
+            try {
+                const missing = comp.missing_ppe.map(ppeToId).join(', ')
+                const severity = comp.missing_ppe.length >= 2 ? 'High' : 'Medium'
+
+                const formData = new FormData()
+                formData.append('violation_type', `Kurang: ${missing}`)
+                formData.append('severity', severity)
+                formData.append('student_id', comp.identified_student_id != null ? String(comp.identified_student_id) : '')
+                formData.append('camera_id', '')
+                formData.append('file', blob, `evidence_${Date.now()}.jpg`)
+
+                const res = await fetch(`${API_BASE}/api/logs`, {
+                    method: 'POST',
+                    body: formData,
+                })
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}))
+                    throw new Error(err.detail || `HTTP ${res.status}`)
+                }
+                success += 1
+            } catch (e) {
+                console.error('Submit violation failed:', e)
+                failed += 1
+            }
+        }
+
+        setIsSubmitting(false)
+        setSubmitStatus({ success, failed })
+    }
 
     // === Canvas Bounding Box Drawing ===
     const drawBoundingBoxes = useCallback(() => {
@@ -125,7 +191,7 @@ export default function ImageUploadContent() {
 
                 const statusText = comp.is_compliant
                     ? '✓ APD LENGKAP'
-                    : `✗ KURANG: ${comp.missing_ppe.join(', ')}`
+                    : `✗ KURANG: ${comp.missing_ppe.map(ppeToId).join(', ')}`
 
                 // Name label above status bar (if identified)
                 const nameText = comp.identified_name ? `👤 ${comp.identified_name}` : null
@@ -475,6 +541,34 @@ export default function ImageUploadContent() {
                                 </div>
                             </div>
 
+                            {/* Submit Violations Button */}
+                            {results.summary.non_compliant > 0 && (
+                                <div className="space-y-2">
+                                    <button
+                                        onClick={submitImageViolations}
+                                        disabled={isSubmitting}
+                                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        {isSubmitting ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Send className="w-4 h-4" />
+                                        )}
+                                        {isSubmitting
+                                            ? 'Submitting...'
+                                            : `Catat ${results.summary.non_compliant} Pelanggaran ke Logs`
+                                        }
+                                    </button>
+                                    {submitStatus && (
+                                        <div className={`text-xs p-2 rounded-lg ${submitStatus.failed > 0 ? 'bg-amber-500/10 text-amber-700' : 'bg-green-500/10 text-green-700'}`}>
+                                            {submitStatus.success} pelanggaran berhasil dicatat
+                                            {submitStatus.failed > 0 && `, ${submitStatus.failed} gagal`}
+                                            {submitStatus.error && ` (${submitStatus.error})`}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Per-Person Compliance */}
                             {filteredCompliance.length > 0 && (
                                 <div className="space-y-3">
@@ -524,7 +618,7 @@ export default function ImageUploadContent() {
                                                     .map((item, i) => (
                                                         <div key={`m-${i}`} className="flex items-center gap-1.5 text-xs text-red-500">
                                                             <X className="w-3 h-3" />
-                                                            {item} — <span className="italic">tidak terdeteksi</span>
+                                                            {ppeToId(item)} — <span className="italic">tidak terdeteksi</span>
                                                         </div>
                                                     ))}
                                             </div>
@@ -546,7 +640,7 @@ export default function ImageUploadContent() {
                                         >
                                             <span className="flex items-center gap-2 font-medium">
                                                 <span className={`w-2 h-2 rounded-full ${CLASS_BADGE_COLORS[det.label] || 'bg-gray-400'}`} />
-                                                {det.label}
+                                                {ppeToId(det.label)}
                                             </span>
                                             <span className="text-muted-foreground font-mono text-xs">
                                                 {(det.confidence * 100).toFixed(1)}%
