@@ -8,6 +8,10 @@ python-multipart
 
 # Database
 sqlite-utils
+SQLAlchemy
+PyMySQL
+python-dotenv
+email-validator
 
 # Image / video processing
 opencv-python

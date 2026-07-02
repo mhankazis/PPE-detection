@@ -10,6 +10,10 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     role = Column(String(20), default="operator", nullable=False)
+    email = Column(String(150), unique=True, index=True, nullable=True)
+    otp_code = Column(String(10), nullable=True)
+    otp_expires = Column(TIMESTAMP, nullable=True)
+    otp_attempts = Column(Integer, default=0, nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 

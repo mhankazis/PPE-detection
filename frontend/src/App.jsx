@@ -4,6 +4,7 @@ import Dashboard from "./components/views/Dashboard"
 import LiveFeed from "./components/views/LiveFeed"
 import Logs from "./components/views/Logs"
 import Login from "./components/views/Login"
+import ForgotPassword from "./components/views/ForgotPassword"
 import Upload from "./components/views/Upload" // unified upload page
 import { ThemeProvider } from "./components/theme-provider"
 import { AuthProvider } from "./contexts/AuthContext"
@@ -19,6 +20,7 @@ function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Layout />}>
                 <Route index element={<Dashboard />} />

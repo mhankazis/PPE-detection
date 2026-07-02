@@ -81,7 +81,7 @@ export default function Login() {
                                 <label className="text-sm font-medium leading-none text-foreground" htmlFor="password">
                                     Password
                                 </label>
-                                <a href="#" className="text-xs font-medium text-primary hover:underline transition-all">Lupa password?</a>
+                                <a href="/forgot-password" className="text-xs font-medium text-primary hover:underline transition-all">Lupa password?</a>
                             </div>
                             <div className="relative group">
                                 <Lock className="absolute left-3 top-2.5 h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />

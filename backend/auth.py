@@ -3,11 +3,13 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 import bcrypt
+import secrets
 
 from database import get_db
 import models
+from email_service import send_otp_email, is_configured as smtp_configured
 
 # JWT Configuration
 SECRET_KEY = "your-super-secret-jwt-key-change-this-in-production" # Change this!
@@ -100,3 +102,142 @@ def update_my_profile(
         current_user.password_hash = get_password_hash(body.new_password)
         db.commit()
     return {"message": "Profil berhasil diperbarui"}
+
+
+# =========================================================
+# Forgot Password - OTP via Email
+# =========================================================
+
+OTP_TTL_MINUTES = 5
+OTP_MAX_ATTEMPTS = 5
+
+
+def _generate_otp() -> str:
+    """Generate 6-digit OTP code."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+class ForgotPasswordRequest(BaseModel):
+    identifier: str  # username or email
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Request OTP. Accepts username or email. Always returns 200 to prevent user enumeration."""
+    if not smtp_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Layanan email belum dikonfigurasi. Hubungi administrator.",
+        )
+
+    identifier = body.identifier.strip().lower()
+    user = (
+        db.query(models.User)
+        .filter(
+            (models.User.username == body.identifier.strip())
+            | (models.User.email == identifier)
+        )
+        .first()
+    )
+
+    # Always return success to prevent enumeration
+    if user is None or not user.email:
+        return {
+            "message": "Jika akun terdaftar dan memiliki email, kode OTP telah dikirim."
+        }
+
+    otp_code = _generate_otp()
+    user.otp_code = otp_code
+    user.otp_expires = datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES)
+    user.otp_attempts = 0
+    db.commit()
+
+    try:
+        send_otp_email(user.email, otp_code)
+    except Exception as e:
+        # Log but don't leak to client
+        print(f"[auth] Failed to send OTP email to {user.email}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal mengirim email. Coba lagi nanti atau hubungi administrator.",
+        )
+
+    return {
+        "message": "Kode OTP telah dikirim ke email terdaftar.",
+        "email_masked": _mask_email(user.email),
+    }
+
+
+class VerifyOTPRequest(BaseModel):
+    identifier: str
+    otp_code: str
+    new_password: str
+
+
+@router.post("/reset-password")
+def reset_password(body: VerifyOTPRequest, db: Session = Depends(get_db)):
+    """Verify OTP and reset password in one step."""
+    identifier = body.identifier.strip().lower()
+    user = (
+        db.query(models.User)
+        .filter(
+            (models.User.username == body.identifier.strip())
+            | (models.User.email == identifier)
+        )
+        .first()
+    )
+
+    if user is None or not user.otp_code or not user.otp_expires:
+        raise HTTPException(status_code=400, detail="Kode OTP tidak valid atau kadaluarsa.")
+
+    if user.otp_attempts >= OTP_MAX_ATTEMPTS:
+        # Invalidate OTP after too many attempts
+        user.otp_code = None
+        user.otp_expires = None
+        db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Terlalu banyak percobaan salah. Silakan minta kode OTP baru.",
+        )
+
+    if datetime.utcnow() > user.otp_expires:
+        user.otp_code = None
+        user.otp_expires = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Kode OTP telah kadaluarsa. Silakan minta kode baru.")
+
+    if not secrets.compare_digest(user.otp_code, body.otp_code):
+        user.otp_attempts = (user.otp_attempts or 0) + 1
+        db.commit()
+        remaining = OTP_MAX_ATTEMPTS - user.otp_attempts
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kode OTP salah. Sisa percobaan: {remaining}.",
+        )
+
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password baru minimal 6 karakter.")
+
+    # Success: update password, clear OTP
+    user.password_hash = get_password_hash(body.new_password)
+    user.otp_code = None
+    user.otp_expires = None
+    user.otp_attempts = 0
+    db.commit()
+
+    return {"message": "Password berhasil direset. Silakan login dengan password baru."}
+
+
+def _mask_email(email: str) -> str:
+    """Mask email for display: j***@example.com"""
+    try:
+        local, domain = email.split("@", 1)
+        if len(local) <= 1:
+            masked_local = "*"
+        elif len(local) <= 3:
+            masked_local = local[0] + "*" * (len(local) - 1)
+        else:
+            masked_local = local[0] + "*" * (len(local) - 2) + local[-1]
+        return f"{masked_local}@{domain}"
+    except Exception:
+        return "***"

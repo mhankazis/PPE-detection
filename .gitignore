@@ -8,6 +8,10 @@ venv/
 # EZVIZ credentials
 backend/ezviz_config.json
 
+# Environment / secrets
+.env
+backend/.env
+
 # Uploads
 backend/.uploads/
 backend/uploads/

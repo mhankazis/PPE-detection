@@ -13,13 +13,18 @@ CREATE TABLE `users` (
   `username` VARCHAR(50) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
   `role` VARCHAR(20) NOT NULL DEFAULT 'operator',
+  `email` VARCHAR(150) DEFAULT NULL,
+  `otp_code` VARCHAR(10) DEFAULT NULL,
+  `otp_expires` TIMESTAMP NULL DEFAULT NULL,
+  `otp_attempts` INT NOT NULL DEFAULT 0,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_users_email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default admin user: username=admin, password=admin123
-INSERT INTO `users` (`username`, `password_hash`, `role`) VALUES
-('admin', '$2b$12$8aL8lU02E9VEj3lI5CCxC.WJ96.JhRdsdrv6fvj7l5hfyOqbOlWF2', 'admin');
+INSERT INTO `users` (`username`, `password_hash`, `role`, `email`) VALUES
+('admin', '$2b$12$8aL8lU02E9VEj3lI5CCxC.WJ96.JhRdsdrv6fvj7l5hfyOqbOlWF2', 'admin', '2241720240@student.polinema.ac.id');
 
 -- --------------------------------------------------------
 -- Table structure for table `students`
