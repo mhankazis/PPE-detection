@@ -125,7 +125,7 @@ class ForgotPasswordRequest(BaseModel):
 
 @router.post("/forgot-password")
 def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Request OTP. Accepts username or email. Always returns 200 to prevent user enumeration."""
+    """Request OTP. Accepts username or email."""
     if not smtp_configured():
         raise HTTPException(
             status_code=503,
@@ -142,11 +142,17 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
         .first()
     )
 
-    # Always return success to prevent enumeration
-    if user is None or not user.email:
-        return {
-            "message": "Jika akun terdaftar dan memiliki email, kode OTP telah dikirim."
-        }
+    # Explicit warning if user not found or email not registered
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Akun tidak terdaftar. Periksa kembali username/email Anda.",
+        )
+    if not user.email:
+        raise HTTPException(
+            status_code=404,
+            detail="Email belum terdaftar di database. Hubungi administrator untuk mengatur email akun Anda.",
+        )
 
     otp_code = _generate_otp()
     user.otp_code = otp_code
