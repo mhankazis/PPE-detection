@@ -106,7 +106,12 @@ def trigger_siren():
 
     _last_trigger_time = now
 
-    # --- Always activate browser alarm (primary alert method) ---
+    # --- Respect global enabled flag (covers browser + camera alarm) ---
+    if not EZVIZ_CONFIG.get("enabled"):
+        print("[Alarm] Disabled — skipping browser + camera alarm")
+        return
+
+    # --- Activate browser alarm (primary alert method) ---
     duration = EZVIZ_CONFIG.get("siren_duration", 2)
     with _alarm_lock:
         _alarm_active = True
@@ -114,7 +119,7 @@ def trigger_siren():
     print(f"[Alarm] Browser alarm ACTIVATED for {duration}s")
 
     # --- Best-effort EZVIZ camera siren (secondary, may be silent on H6C) ---
-    if not EZVIZ_CONFIG.get("enabled") or not EZVIZ_CONFIG.get("device_serial"):
+    if not EZVIZ_CONFIG.get("device_serial"):
         return
 
     def _do_camera_trigger():

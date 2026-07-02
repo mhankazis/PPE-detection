@@ -20,6 +20,7 @@ pillow
 
 # Detection
 ultralytics>=8.4.0
+lap>=0.5.12
 # Preferred inference backend — lighter & faster startup than PyTorch.
 # CPU-only build; swap to onnxruntime-gpu for CUDA acceleration.
 onnxruntime>=1.18.0
