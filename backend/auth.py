@@ -79,6 +79,8 @@ def get_my_profile(current_user: models.User = Depends(get_current_user)):
         "id": current_user.id,
         "username": current_user.username,
         "role": current_user.role,
+        "email": current_user.email,
+        "email_masked": _mask_email(current_user.email) if current_user.email else None,
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
     }
 
@@ -241,3 +243,156 @@ def _mask_email(email: str) -> str:
         return f"{masked_local}@{domain}"
     except Exception:
         return "***"
+
+
+# =========================================================
+# Change Email - OTP verification for new email
+# =========================================================
+
+class ChangeEmailRequest(BaseModel):
+    new_email: EmailStr
+
+
+@router.post("/request-email-change")
+def request_email_change(
+    body: ChangeEmailRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Send OTP to NEW email to verify ownership before changing email."""
+    if not smtp_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Layanan email belum dikonfigurasi. Hubungi administrator.",
+        )
+
+    new_email = body.new_email.strip().lower()
+
+    # Reject if same as current
+    if current_user.email and current_user.email.lower() == new_email:
+        raise HTTPException(status_code=400, detail="Email baru sama dengan email saat ini.")
+
+    # Reject if email already used by another user
+    existing = (
+        db.query(models.User)
+        .filter(models.User.email == new_email)
+        .first()
+    )
+    if existing and existing.id != current_user.id:
+        raise HTTPException(status_code=400, detail="Email sudah digunakan akun lain.")
+
+    # Generate OTP, store in pending_email + otp fields
+    otp_code = _generate_otp()
+    current_user.pending_email = new_email
+    current_user.otp_code = otp_code
+    current_user.otp_expires = datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES)
+    current_user.otp_attempts = 0
+    db.commit()
+
+    try:
+        send_otp_email(new_email, otp_code)
+    except Exception as e:
+        print(f"[auth] Failed to send change-email OTP to {new_email}: {e}")
+        # Rollback pending state
+        current_user.pending_email = None
+        current_user.otp_code = None
+        current_user.otp_expires = None
+        db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal mengirim email verifikasi. Periksa alamat email dan coba lagi.",
+        )
+
+    return {
+        "message": "Kode OTP telah dikirim ke email baru.",
+        "email_masked": _mask_email(new_email),
+    }
+
+
+class ConfirmEmailChangeRequest(BaseModel):
+    otp_code: str
+
+
+@router.post("/confirm-email-change")
+def confirm_email_change(
+    body: ConfirmEmailChangeRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Verify OTP and apply email change."""
+    if not current_user.pending_email or not current_user.otp_code or not current_user.otp_expires:
+        raise HTTPException(
+            status_code=400,
+            detail="Tidak ada permintaan ubah email yang aktif. Silakan minta OTP baru.",
+        )
+
+    if current_user.otp_attempts >= OTP_MAX_ATTEMPTS:
+        current_user.otp_code = None
+        current_user.otp_expires = None
+        current_user.pending_email = None
+        db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Terlalu banyak percobaan salah. Silakan minta kode OTP baru.",
+        )
+
+    if datetime.utcnow() > current_user.otp_expires:
+        current_user.otp_code = None
+        current_user.otp_expires = None
+        current_user.pending_email = None
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="Kode OTP telah kadaluarsa. Silakan minta kode baru.",
+        )
+
+    if not secrets.compare_digest(current_user.otp_code, body.otp_code.strip()):
+        current_user.otp_attempts = (current_user.otp_attempts or 0) + 1
+        db.commit()
+        remaining = OTP_MAX_ATTEMPTS - current_user.otp_attempts
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kode OTP salah. Sisa percobaan: {remaining}.",
+        )
+
+    # Re-check uniqueness at confirm time (race safety)
+    new_email = current_user.pending_email
+    existing = (
+        db.query(models.User)
+        .filter(models.User.email == new_email)
+        .first()
+    )
+    if existing and existing.id != current_user.id:
+        current_user.otp_code = None
+        current_user.otp_expires = None
+        current_user.pending_email = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Email sudah digunakan akun lain.")
+
+    # Apply change
+    current_user.email = new_email
+    current_user.pending_email = None
+    current_user.otp_code = None
+    current_user.otp_expires = None
+    current_user.otp_attempts = 0
+    db.commit()
+
+    return {
+        "message": "Email berhasil diperbarui.",
+        "email": current_user.email,
+        "email_masked": _mask_email(current_user.email),
+    }
+
+
+@router.post("/cancel-email-change")
+def cancel_email_change(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cancel any pending email change for current user."""
+    current_user.pending_email = None
+    current_user.otp_code = None
+    current_user.otp_expires = None
+    current_user.otp_attempts = 0
+    db.commit()
+    return {"message": "Permintaan ubah email dibatalkan."}

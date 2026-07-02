@@ -3,14 +3,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
 import { useState, useEffect } from "react"
-import { Shield, User, Key, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown } from "lucide-react"
+import { Shield, User, Key, Mail, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown } from "lucide-react"
 
 export default function Settings() {
-    const { user } = useAuth()
+    const { user, fetchProfile } = useAuth()
 
     const [profileData, setProfileData] = useState({
         username: "",
         role: "",
+        email: "",
+        emailMasked: "",
         created_at: "",
     })
 
@@ -30,13 +32,23 @@ export default function Settings() {
     const [sirenMsg, setSirenMsg] = useState({ type: "", text: "" })
 
     // Accordion open state
-    const [openSection, setOpenSection] = useState("profile") // "profile" | "password" | "siren"
+    const [openSection, setOpenSection] = useState("profile") // "profile" | "password" | "email" | "siren"
+
+    // Email change state
+    const [emailStep, setEmailStep] = useState("form") // "form" | "otp"
+    const [newEmail, setNewEmail] = useState("")
+    const [emailOtp, setEmailOtp] = useState("")
+    const [emailMasked, setEmailMasked] = useState("")
+    const [isEmailSaving, setIsEmailSaving] = useState(false)
+    const [emailMsg, setEmailMsg] = useState({ type: "", text: "" })
 
     useEffect(() => {
         if (user) {
             setProfileData({
                 username: user.username || "",
                 role: user.role || "",
+                email: user.email || "",
+                emailMasked: user.email_masked || "",
                 created_at: user.created_at || "",
             })
         }
@@ -111,6 +123,103 @@ export default function Settings() {
         } finally {
             setIsSaving(false)
         }
+    }
+
+    const handleRequestEmailChange = async () => {
+        setEmailMsg({ type: "", text: "" })
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(newEmail)) {
+            setEmailMsg({ type: "error", text: "Format email tidak valid." })
+            return
+        }
+        if (profileData.email && newEmail.toLowerCase() === profileData.email.toLowerCase()) {
+            setEmailMsg({ type: "error", text: "Email baru sama dengan email saat ini." })
+            return
+        }
+
+        setIsEmailSaving(true)
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/auth/request-email-change', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ new_email: newEmail }),
+            })
+            const data = await res.json()
+            if (res.ok) {
+                setEmailStep("otp")
+                setEmailMasked(data.email_masked || "")
+                setEmailMsg({ type: "success", text: data.message || "Kode OTP telah dikirim ke email baru." })
+            } else {
+                setEmailMsg({ type: "error", text: data.detail || "Gagal mengirim OTP." })
+            }
+        } catch (err) {
+            setEmailMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        } finally {
+            setIsEmailSaving(false)
+        }
+    }
+
+    const handleConfirmEmailChange = async () => {
+        setEmailMsg({ type: "", text: "" })
+        if (!emailOtp.trim()) {
+            setEmailMsg({ type: "error", text: "Kode OTP wajib diisi." })
+            return
+        }
+
+        setIsEmailSaving(true)
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/auth/confirm-email-change', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ otp_code: emailOtp.trim() }),
+            })
+            const data = await res.json()
+            if (res.ok) {
+                setProfileData(prev => ({
+                    ...prev,
+                    email: data.email || newEmail,
+                    emailMasked: data.email_masked || "",
+                }))
+                setEmailStep("form")
+                setNewEmail("")
+                setEmailOtp("")
+                setEmailMasked("")
+                setEmailMsg({ type: "success", text: data.message || "Email berhasil diperbarui." })
+                // Refresh user context so email updates across app
+                if (fetchProfile) {
+                    try { await fetchProfile(); } catch (e) { /* ignore */ }
+                }
+            } else {
+                setEmailMsg({ type: "error", text: data.detail || "Gagal verifikasi OTP." })
+            }
+        } catch (err) {
+            setEmailMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        } finally {
+            setIsEmailSaving(false)
+        }
+    }
+
+    const handleCancelEmailChange = async () => {
+        const token = sessionStorage.getItem('token')
+        try {
+            await fetch('http://localhost:8000/api/auth/cancel-email-change', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            })
+        } catch (e) { /* ignore */ }
+        setEmailStep("form")
+        setNewEmail("")
+        setEmailOtp("")
+        setEmailMasked("")
+        setEmailMsg({ type: "", text: "" })
     }
 
     const roleLabel = (role) => {
@@ -250,6 +359,10 @@ export default function Settings() {
                             <Key className="w-4 h-4 text-primary" />
                             <span>Terdaftar: {formatDate(profileData.created_at)}</span>
                         </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Mail className="w-4 h-4 text-primary" />
+                            <span>Email: {profileData.emailMasked || profileData.email || "-"}</span>
+                        </div>
                     </CardContent>
                 </Card>
 
@@ -273,6 +386,15 @@ export default function Settings() {
                                     readOnly
                                 />
                                 <p className="text-[0.8rem] text-muted-foreground">Username tidak dapat diubah.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium leading-none">Email</label>
+                                <input
+                                    className="flex h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm cursor-not-allowed"
+                                    value={profileData.emailMasked || profileData.email || "-"}
+                                    readOnly
+                                />
+                                <p className="text-[0.8rem] text-muted-foreground">Ubah email lewat menu "Ubah Email" di bawah.</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
@@ -363,6 +485,100 @@ export default function Settings() {
                                         </>
                                     ) : "Simpan Password"}
                                 </Button>
+                            </CardFooter>
+                        </>
+                    )}
+                </Card>
+
+                {/* Accordion: Ubah Email */}
+                <Card>
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={Mail}
+                            title="Ubah Email"
+                            description="Verifikasi email baru dengan kode OTP."
+                            section="email"
+                        />
+                    </CardHeader>
+                    {openSection === "email" && (
+                        <>
+                            <CardContent className="space-y-4 pt-2">
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none">Email Saat Ini</label>
+                                    <input
+                                        className="flex h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm cursor-not-allowed"
+                                        value={profileData.emailMasked || profileData.email || "-"}
+                                        readOnly
+                                    />
+                                </div>
+
+                                {emailStep === "form" ? (
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-medium leading-none" htmlFor="newEmail">Email Baru</label>
+                                        <input
+                                            id="newEmail"
+                                            type="email"
+                                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                            placeholder="masukkan email baru"
+                                            value={newEmail}
+                                            onChange={(e) => setNewEmail(e.target.value)}
+                                        />
+                                        <p className="text-[0.8rem] text-muted-foreground">Kode OTP akan dikirim ke email baru untuk verifikasi.</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="p-3 rounded-md bg-primary/10 text-sm">
+                                            Kode OTP telah dikirim ke <span className="font-medium">{emailMasked}</span>.
+                                        </div>
+                                        <label className="text-sm font-medium leading-none" htmlFor="emailOtp">Kode OTP</label>
+                                        <input
+                                            id="emailOtp"
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm tracking-widest ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                            placeholder="6 digit kode"
+                                            value={emailOtp}
+                                            onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, ""))}
+                                        />
+                                    </div>
+                                )}
+
+                                {emailMsg.text && (
+                                    <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${emailMsg.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+                                        {emailMsg.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                        {emailMsg.text}
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter className="bg-muted/30 pt-4 flex justify-between">
+                                {emailStep === "otp" ? (
+                                    <>
+                                        <Button variant="outline" onClick={handleCancelEmailChange} disabled={isEmailSaving}>
+                                            Batal
+                                        </Button>
+                                        <Button onClick={handleConfirmEmailChange} disabled={isEmailSaving} className="min-w-[140px]">
+                                            {isEmailSaving ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                                    Verifikasi...
+                                                </>
+                                            ) : "Verifikasi OTP"}
+                                        </Button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span />
+                                        <Button onClick={handleRequestEmailChange} disabled={isEmailSaving} className="min-w-[140px]">
+                                            {isEmailSaving ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                                    Mengirim...
+                                                </>
+                                            ) : "Kirim OTP"}
+                                        </Button>
+                                    </>
+                                )}
                             </CardFooter>
                         </>
                     )}

@@ -11,6 +11,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(20), default="operator", nullable=False)
     email = Column(String(150), unique=True, index=True, nullable=True)
+    pending_email = Column(String(150), nullable=True)
     otp_code = Column(String(10), nullable=True)
     otp_expires = Column(TIMESTAMP, nullable=True)
     otp_attempts = Column(Integer, default=0, nullable=False)

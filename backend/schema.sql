@@ -14,6 +14,7 @@ CREATE TABLE `users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `role` VARCHAR(20) NOT NULL DEFAULT 'operator',
   `email` VARCHAR(150) DEFAULT NULL,
+  `pending_email` VARCHAR(150) DEFAULT NULL,
   `otp_code` VARCHAR(10) DEFAULT NULL,
   `otp_expires` TIMESTAMP NULL DEFAULT NULL,
   `otp_attempts` INT NOT NULL DEFAULT 0,
