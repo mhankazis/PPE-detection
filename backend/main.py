@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response, Depends
+from fastapi import FastAPI, Response, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import time
@@ -319,24 +319,29 @@ def read_root():
 from fastapi.responses import StreamingResponse
 import cv2
 
-# Credentials provided:
-# username: mhankazis@gmail.com (URL encoded as mhankazis%40gmail.com)
-# password: Skripsi22
-# Verification code (often used for EZVIZ cameras with username 'admin'): OGXCCS
-
-# Option 1: Tapo/General RTSP with account
-#CAMERA_URL = "rtsp://mhankazis%40gmail.com:Skripsi22@192.168.1.26:554/stream1"
-
-# Option 2: Ezviz/Other cameras using Verification Code
+# Camera RTSP configuration — loaded from camera_config.py (persists to camera_config.json).
+# IP/port/credentials editable via /api/camera/config endpoint (Settings → Konfigurasi Kamera).
 # EZVIZ RTSP auth: admin password = device verification code (OGXCCS), NOT the app account password.
 #
 # Stream choice (verified via probe):
 #   /H.264                  -> main stream 2880x1616 (heavy for real-time detection)
 #   /Streaming/Channels/102 -> sub  stream 768x432   (4x lighter, ideal for live detection)
 # Using sub stream so YOLO + face recognition stay responsive when Detection ON.
-CAMERA_URL = "rtsp://admin:OGXCCS@192.168.137.202:554/Streaming/Channels/102"
-# Main stream kept as fallback (higher quality for evidence snapshots if needed)
-CAMERA_URL_MAIN = "rtsp://admin:OGXCCS@192.168.137.202:554/H.264"
+from camera_config import (
+    get_camera_url as _get_camera_url,
+    get_camera_url_main as _get_camera_url_main,
+    get_config_safe as _get_camera_config_safe,
+    update_ip as _update_camera_ip,
+    test_connection as _test_camera_connection,
+)
+
+def CAMERA_URL():
+    """Current sub-stream RTSP URL (dynamic, reads from camera_config)."""
+    return _get_camera_url()
+
+def CAMERA_URL_MAIN():
+    """Current main-stream RTSP URL (dynamic, reads from camera_config)."""
+    return _get_camera_url_main()
 
 def create_error_frame(message):
     import numpy as np
@@ -372,8 +377,9 @@ class CameraStream:
         import os
         import time
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        print(f"Connecting to camera at {CAMERA_URL}...")
-        self.camera = cv2.VideoCapture(CAMERA_URL, cv2.CAP_FFMPEG)
+        url = CAMERA_URL()  # Read dynamically from camera_config
+        print(f"Connecting to camera at {url}...")
+        self.camera = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
         self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         consecutive_failures = 0
@@ -411,7 +417,10 @@ class CameraStream:
                     print("Reconnecting to camera...")
                     if self.camera:
                         self.camera.release()
-                    self.camera = cv2.VideoCapture(CAMERA_URL, cv2.CAP_FFMPEG)
+                    # Re-read URL in case config changed while waiting
+                    url = CAMERA_URL()
+                    print(f"Reconnecting with URL: {url}")
+                    self.camera = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
                     self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     consecutive_failures = 0
 
@@ -480,6 +489,87 @@ def stop_camera():
     except Exception:
         pass
     return {"message": "Camera stopped"}
+
+
+# ---------- Camera RTSP Configuration ----------
+from pydantic import BaseModel, field_validator
+import re
+
+class CameraConfigRequest(BaseModel):
+    """Request body for updating camera IP/port."""
+    ip: str
+    port: int = 554
+
+    @field_validator("ip")
+    @classmethod
+    def validate_ip(cls, v):
+        v = v.strip()
+        # Accept IPv4 or hostname
+        ipv4_re = r"^(\d{1,3}\.){3}\d{1,3}$"
+        hostname_re = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+        if not (re.match(ipv4_re, v) or re.match(hostname_re, v)):
+            raise ValueError("IP tidak valid. Gunakan format IPv4 (contoh: 192.168.1.100) atau hostname.")
+        # Validate octets if IPv4
+        if re.match(ipv4_re, v):
+            octets = [int(x) for x in v.split(".")]
+            if any(o < 0 or o > 255 for o in octets):
+                raise ValueError("Octet IP harus antara 0-255.")
+        return v
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v):
+        if v < 1 or v > 65535:
+            raise ValueError("Port harus antara 1-65535.")
+        return v
+
+
+@app.get("/api/camera/config")
+def get_camera_config(current_user: models.User = Depends(get_current_user)):
+    """Get current camera RTSP config (password masked)."""
+    return _get_camera_config_safe()
+
+
+@app.post("/api/camera/test")
+def test_camera_connection(body: CameraConfigRequest, current_user: models.User = Depends(get_current_user)):
+    """Test RTSP connection to a candidate IP/port WITHOUT saving.
+
+    Runs synchronously — may take 5-10s. Frontend should show loading state.
+    """
+    result = _test_camera_connection(ip=body.ip, port=body.port, timeout=8.0)
+    return result
+
+
+@app.put("/api/camera/config")
+def update_camera_config(body: CameraConfigRequest, current_user: models.User = Depends(get_current_user)):
+    """Update camera IP/port, persist to file, and restart stream.
+
+    Flow:
+      1. Validate IP/port format (pydantic).
+      2. Test connection to new IP — reject if fails.
+      3. Save to camera_config.json.
+      4. Stop existing CameraStream (releases old RTSP).
+      5. Next /api/video_feed request will auto-start stream with new URL.
+    """
+    # Test connection first — don't save if unreachable
+    test = _test_camera_connection(ip=body.ip, port=body.port, timeout=8.0)
+    if not test["ok"]:
+        raise HTTPException(status_code=400, detail=test["message"])
+
+    # Persist
+    new_url = _update_camera_ip(body.ip, body.port)
+
+    # Restart stream so it picks up new URL
+    try:
+        camera_stream.stop()
+    except Exception as e:
+        print(f"[Camera Config] Warning: stop_stream failed: {e}")
+
+    return {
+        "message": f"IP kamera diperbarui ke {body.ip}:{body.port}. Stream akan terhubung ulang otomatis.",
+        "config": _get_camera_config_safe(),
+        "test": test,
+    }
 
 if __name__ == "__main__":
     import uvicorn

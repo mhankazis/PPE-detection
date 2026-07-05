@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
 import { useState, useEffect } from "react"
-import { Shield, User, Key, Mail, Gauge, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown, Play, Download } from "lucide-react"
+import { Shield, User, Key, Mail, Gauge, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown, Play, Download, Camera, Wifi } from "lucide-react"
 
 export default function Settings() {
     const { user, fetchProfile } = useAuth()
@@ -51,6 +51,15 @@ export default function Settings() {
     const [benchError, setBenchError] = useState("")
     const [benchMsg, setBenchMsg] = useState({ type: "", text: "" })
 
+    // Camera config state
+    const [cameraIp, setCameraIp] = useState("")
+    const [cameraPort, setCameraPort] = useState(554)
+    const [cameraCurrent, setCameraCurrent] = useState(null) // {ip, port, ...} from server
+    const [isCameraTesting, setIsCameraTesting] = useState(false)
+    const [isCameraSaving, setIsCameraSaving] = useState(false)
+    const [cameraMsg, setCameraMsg] = useState({ type: "", text: "" })
+    const [cameraTestResult, setCameraTestResult] = useState(null) // {ok, message, resolution, fps}
+
     useEffect(() => {
         if (user) {
             setProfileData({
@@ -82,6 +91,101 @@ export default function Settings() {
         }
         fetchSirenConfig()
     }, [])
+
+    // Fetch camera config on mount
+    useEffect(() => {
+        const fetchCameraConfig = async () => {
+            try {
+                const token = sessionStorage.getItem('token')
+                const res = await fetch('http://localhost:8000/api/camera/config', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    setCameraCurrent(data)
+                    setCameraIp(data.ip || "")
+                    setCameraPort(data.port || 554)
+                }
+            } catch (e) {
+                console.error("Failed to fetch camera config", e)
+            }
+        }
+        fetchCameraConfig()
+    }, [])
+
+    const handleTestCamera = async () => {
+        setCameraMsg({ type: "", text: "" })
+        setCameraTestResult(null)
+
+        // Basic IP format validation
+        const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/
+        if (!ipRegex.test(cameraIp.trim())) {
+            setCameraMsg({ type: "error", text: "Format IP tidak valid. Contoh: 192.168.1.100" })
+            return
+        }
+        const octets = cameraIp.trim().split(".").map(Number)
+        if (octets.some(o => o < 0 || o > 255)) {
+            setCameraMsg({ type: "error", text: "Octet IP harus antara 0-255." })
+            return
+        }
+        setIsCameraTesting(true)
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/camera/test', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip: cameraIp.trim(), port: parseInt(cameraPort) }),
+            })
+            const data = await res.json()
+            setCameraTestResult(data)
+            if (data.ok) {
+                setCameraMsg({ type: "success", text: data.message })
+            } else {
+                setCameraMsg({ type: "error", text: data.message || "Koneksi gagal." })
+            }
+        } catch (err) {
+            setCameraMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        } finally {
+            setIsCameraTesting(false)
+        }
+    }
+
+    const handleSaveCamera = async () => {
+        setCameraMsg({ type: "", text: "" })
+
+        const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/
+        if (!ipRegex.test(cameraIp.trim())) {
+            setCameraMsg({ type: "error", text: "Format IP tidak valid. Contoh: 192.168.1.100" })
+            return
+        }
+        setIsCameraSaving(true)
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/camera/config', {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ip: cameraIp.trim(), port: parseInt(cameraPort) }),
+            })
+            const data = await res.json()
+            if (res.ok) {
+                setCameraCurrent(data.config)
+                setCameraTestResult(data.test)
+                setCameraMsg({ type: "success", text: data.message || "IP kamera berhasil disimpan." })
+            } else {
+                setCameraMsg({ type: "error", text: data.detail || "Gagal menyimpan IP kamera." })
+            }
+        } catch (err) {
+            setCameraMsg({ type: "error", text: "Terjadi kesalahan jaringan." })
+        } finally {
+            setIsCameraSaving(false)
+        }
+    }
 
     const handlePasswordChange = (e) => {
         const { name, value } = e.target
@@ -791,6 +895,130 @@ export default function Settings() {
                                         <>
                                             <Play className="w-4 h-4 mr-2" />
                                             Run Benchmark
+                                        </>
+                                    )}
+                                </Button>
+                            </CardFooter>
+                        </>
+                    )}
+                </Card>
+
+                {/* Accordion: Konfigurasi Kamera (IP RTSP) */}
+                <Card>
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={Camera}
+                            title="Konfigurasi Kamera"
+                            description="Ubah IP kamera CCTV jika IP berubah (DHCP/restart router)."
+                            badge={
+                                cameraCurrent ? (
+                                    <Badge variant="secondary" className="font-mono">
+                                        <Wifi className="w-3 h-3 mr-1" />
+                                        {cameraCurrent.ip}:{cameraCurrent.port}
+                                    </Badge>
+                                ) : null
+                            }
+                            section="camera"
+                        />
+                    </CardHeader>
+                    {openSection === "camera" && (
+                        <>
+                            <CardContent className="space-y-4 pt-2">
+                                <div className="p-3 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300 text-sm space-y-1">
+                                    <div className="font-medium flex items-center gap-2">
+                                        <Camera className="w-4 h-4" />
+                                        Cara cek IP kamera di aplikasi EZVIZ
+                                    </div>
+                                    <ol className="list-decimal list-inside text-[0.8rem] space-y-0.5 ml-2">
+                                        <li>Buka aplikasi EZVIZ di HP</li>
+                                        <li>Pilih kamera → tap ikon ⚙️ (Settings) di pojok kanan atas</li>
+                                        <li>Menu <span className="font-mono">Network</span> → <span className="font-mono">IP Address</span></li>
+                                        <li>Catat IP (contoh: 192.168.137.202) lalu input ke field di bawah</li>
+                                    </ol>
+                                </div>
+
+                                {cameraCurrent && (
+                                    <div className="p-3 rounded-md bg-muted/50 text-sm">
+                                        <div className="text-[0.7rem] text-muted-foreground uppercase mb-1">IP Saat Ini (tersimpan)</div>
+                                        <div className="font-mono font-medium text-base">{cameraCurrent.ip}</div>
+                                        <div className="text-[0.75rem] text-muted-foreground mt-1">
+                                            Port: {cameraCurrent.port} (standar RTSP) • Username: {cameraCurrent.username}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium leading-none" htmlFor="cameraIp">IP Kamera Baru</label>
+                                    <input
+                                        id="cameraIp"
+                                        type="text"
+                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        placeholder="192.168.1.100"
+                                        value={cameraIp}
+                                        onChange={(e) => setCameraIp(e.target.value)}
+                                    />
+                                    <p className="text-[0.8rem] text-muted-foreground">
+                                        Port standar RTSP (554) otomatis. Klik <span className="font-medium">Test Koneksi</span> dulu untuk memastikan IP benar sebelum menyimpan.
+                                    </p>
+                                </div>
+                                <p className="text-[0.8rem] text-muted-foreground">
+                                    Klik <span className="font-medium">Test Koneksi</span> dulu untuk memastikan IP benar sebelum menyimpan.
+                                </p>
+
+                                {cameraTestResult && (
+                                    <div className={`p-3 rounded-md text-sm ${cameraTestResult.ok ? "bg-green-500/10 text-green-700 dark:text-green-300" : "bg-destructive/10 text-destructive"}`}>
+                                        <div className="flex items-center gap-2 font-medium">
+                                            {cameraTestResult.ok ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                            {cameraTestResult.message}
+                                        </div>
+                                        {cameraTestResult.ok && cameraTestResult.resolution && (
+                                            <div className="text-[0.75rem] mt-1 ml-6">
+                                                Resolusi: {cameraTestResult.resolution[0]}×{cameraTestResult.resolution[1]}
+                                                {cameraTestResult.fps ? ` @ ${cameraTestResult.fps.toFixed(1)} FPS` : ""}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {cameraMsg.text && (
+                                    <div className={`flex items-center gap-2 text-sm p-3 rounded-md ${cameraMsg.type === "success" ? "bg-green-500/10 text-green-600" : "bg-destructive/10 text-destructive"}`}>
+                                        {cameraMsg.type === "success" ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                                        {cameraMsg.text}
+                                    </div>
+                                )}
+                            </CardContent>
+                            <CardFooter className="bg-muted/30 pt-4 flex justify-between">
+                                <Button
+                                    variant="outline"
+                                    onClick={handleTestCamera}
+                                    disabled={isCameraTesting || isCameraSaving}
+                                >
+                                    {isCameraTesting ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                            Menguji...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Wifi className="w-4 h-4 mr-2" />
+                                            Test Koneksi
+                                        </>
+                                    )}
+                                </Button>
+                                <Button
+                                    onClick={handleSaveCamera}
+                                    disabled={isCameraTesting || isCameraSaving}
+                                    className="min-w-[160px]"
+                                >
+                                    {isCameraSaving ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                            Menyimpan...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle className="w-4 h-4 mr-2" />
+                                            Simpan & Restart Stream
                                         </>
                                     )}
                                 </Button>
