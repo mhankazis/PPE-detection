@@ -38,6 +38,7 @@ export default function VideoUploadContent() {
     const [isProcessing, setIsProcessing] = useState(false)
     const [results, setResults] = useState(null)
     const [videoSrc, setVideoSrc] = useState(null)
+    const [annotatedVideoUrl, setAnnotatedVideoUrl] = useState(null) // URL video annotated (ann_*.mp4, bbox baked-in)
     const [error, setError] = useState(null)
     const [activeFilters, setActiveFilters] = useState(new Set(ALL_CLASSES))
     const [currentFrameData, setCurrentFrameData] = useState(null)
@@ -93,13 +94,36 @@ export default function VideoUploadContent() {
                 throw new Error(err.detail || `Render gagal (${res.status})`)
             }
             const data = await res.json()
-            // Trigger download
-            const a = document.createElement('a')
-            a.href = `${API_BASE}${data.annotated_video_url}`
-            a.download = `annotated_${videoFilename}`
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
+            const annotatedUrl = `${API_BASE}${data.annotated_video_url}`
+            // Annotated video already loaded by processVideo; refresh in case user re-renders
+            setAnnotatedVideoUrl(annotatedUrl)
+
+            // Download via blob (cross-origin <a download> unreliable in some browsers)
+            try {
+                const blobRes = await fetch(annotatedUrl)
+                if (!blobRes.ok) throw new Error(`HTTP ${blobRes.status}`)
+                const blob = await blobRes.blob()
+                const objectUrl = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = objectUrl
+                a.download = `annotated_${videoFilename}`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                // Revoke after delay to ensure download started
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+            } catch (blobErr) {
+                // Fallback: direct link (may open in new tab on some browsers)
+                console.warn("Blob download failed, fallback to direct link:", blobErr)
+                const a = document.createElement('a')
+                a.href = annotatedUrl
+                a.download = `annotated_${videoFilename}`
+                a.target = "_blank"
+                a.rel = "noopener"
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+            }
         } catch (e) {
             setDownloadError(e.message || 'Gagal membuat video annotated')
         } finally {
@@ -461,6 +485,7 @@ export default function VideoUploadContent() {
             setPreviewUrl(URL.createObjectURL(file))
             setResults(null)
             setVideoSrc(null)
+            setAnnotatedVideoUrl(null)
             setError(null)
             setCurrentFrameData(null)
         } else {
@@ -487,6 +512,7 @@ export default function VideoUploadContent() {
         setPreviewUrl(null)
         setResults(null)
         setVideoSrc(null)
+        setAnnotatedVideoUrl(null)
         setError(null)
         setCurrentFrameData(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
@@ -514,8 +540,28 @@ export default function VideoUploadContent() {
 
             const data = await response.json()
             setResults(data)
-            setVideoSrc(`${API_BASE}${data.video_url}`)
+            const originalUrl = `${API_BASE}${data.video_url}`
+            setVideoSrc(originalUrl)
             setActiveFilters(new Set(ALL_CLASSES))
+
+            // Auto-render annotated video (bbox baked-in) so fullscreen works
+            try {
+                const videoFilename = data.video_url.split('/').pop()
+                const annRes = await fetch(`${API_BASE}/api/detect/video-annotated`, {
+                    method: 'POST',
+                    body: (() => {
+                        const fd = new FormData()
+                        fd.append('video_filename', videoFilename)
+                        return fd
+                    })(),
+                })
+                if (annRes.ok) {
+                    const annData = await annRes.json()
+                    setAnnotatedVideoUrl(`${API_BASE}${annData.annotated_video_url}`)
+                }
+            } catch (annErr) {
+                console.warn('Auto-render annotated failed:', annErr)
+            }
         } catch (err) {
             setError(err.message || 'Video processing failed. Make sure the backend server is running.')
         } finally {
@@ -591,21 +637,22 @@ export default function VideoUploadContent() {
                             </button>
                         </div>
 
-                        {/* Video Display with Canvas Overlay */}
+                        {/* Video Display — annotated video (bbox baked-in, fullscreen OK) */}
                         <div className="relative bg-black/5 dark:bg-black/20 flex items-center justify-center p-4">
                             <div className="relative inline-flex rounded-lg overflow-hidden">
                                 {videoSrc ? (
                                     <>
                                         <video
                                             ref={videoRef}
-                                            src={videoSrc}
+                                            src={annotatedVideoUrl || videoSrc}
                                             crossOrigin="anonymous"
                                             controls
                                             className="max-h-[500px] w-auto shadow-sm block"
                                         />
+                                        {/* Canvas overlay hidden — annotated video has bbox baked-in */}
                                         <canvas
                                             ref={canvasRef}
-                                            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+                                            className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-0"
                                         />
                                     </>
                                 ) : (
