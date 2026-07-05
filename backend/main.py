@@ -20,6 +20,8 @@ app.include_router(auth_router)
 app.include_router(students_router)
 app.include_router(logs_router)
 app.include_router(detect_router)
+from perf_router import router as perf_router
+app.include_router(perf_router)
 
 
 # EZVIZ Alarm Configuration API
