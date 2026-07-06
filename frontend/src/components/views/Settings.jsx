@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
 import { useState, useEffect } from "react"
-import { Shield, User, Key, Mail, Gauge, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown, Play, Download, Camera, Wifi } from "lucide-react"
+import { Shield, User, Key, Mail, Gauge, CheckCircle, AlertCircle, Loader2, Bell, Volume2, ChevronDown, Play, Download, Camera, Wifi, BrainCircuit, Upload } from "lucide-react"
 
 export default function Settings() {
     const { user, fetchProfile } = useAuth()
@@ -60,6 +60,13 @@ export default function Settings() {
     const [cameraMsg, setCameraMsg] = useState({ type: "", text: "" })
     const [cameraTestResult, setCameraTestResult] = useState(null) // {ok, message, resolution, fps}
 
+    // Model upload state
+    const [modelInfo, setModelInfo] = useState(null)
+    const [modelFile, setModelFile] = useState(null)
+    const [isModelUploading, setIsModelUploading] = useState(false)
+    const [modelMsg, setModelMsg] = useState({ type: "", text: "" })
+    const [modelUploadProgress, setModelUploadProgress] = useState(0)
+
     useEffect(() => {
         if (user) {
             setProfileData({
@@ -111,6 +118,19 @@ export default function Settings() {
             }
         }
         fetchCameraConfig()
+    }, [])
+
+    useEffect(() => {
+        const fetchModelInfo = async () => {
+            try {
+                const token = sessionStorage.getItem('token')
+                const res = await fetch('http://localhost:8000/api/model/info', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                })
+                if (res.ok) setModelInfo(await res.json())
+            } catch (e) { /* ignore */ }
+        }
+        fetchModelInfo()
     }, [])
 
     const handleTestCamera = async () => {
@@ -405,6 +425,106 @@ export default function Settings() {
         a.download = `benchmark_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`
         a.click()
         URL.revokeObjectURL(url)
+    }
+
+    const [convertOnnx, setConvertOnnx] = useState(true) // default: auto-export ONNX
+
+    const handleModelUpload = async () => {
+        if (!modelFile) return
+        setIsModelUploading(true)
+        setModelMsg({ type: "", text: "" })
+        setModelUploadProgress(0)
+        try {
+            const token = sessionStorage.getItem('token')
+            const formData = new FormData()
+            formData.append('file', modelFile)
+
+            const url = `http://localhost:8000/api/model/upload?convert_onnx=${convertOnnx ? 'true' : 'false'}`
+            const res = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest()
+                xhr.open('POST', url)
+                xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        setModelUploadProgress(Math.round((e.loaded / e.total) * 100))
+                    }
+                }
+                xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: () => Promise.resolve(JSON.parse(xhr.responseText)) })
+                xhr.onerror = () => reject(new Error('Network error'))
+                xhr.send(formData)
+            })
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                throw new Error(err.detail || `Upload gagal (${res.status})`)
+            }
+            const data = await res.json()
+            let msg = data.message || "Model berhasil diperbarui"
+            if (data.onnx_export?.attempted) {
+                msg += data.onnx_export.success
+                    ? ` • ONNX: ${data.onnx_export.message}`
+                    : ` • ONNX gagal: ${data.onnx_export.message}`
+            }
+            if (data.active_backend) msg += ` • Backend aktif: ${data.active_backend.toUpperCase()}`
+            setModelMsg({ type: "success", text: msg })
+            setModelFile(null)
+            // Refresh model info
+            try {
+                const infoRes = await fetch('http://localhost:8000/api/model/info', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                })
+                if (infoRes.ok) setModelInfo(await infoRes.json())
+            } catch (e) { /* ignore */ }
+        } catch (e) {
+            setModelMsg({ type: "error", text: e.message || 'Gagal upload model' })
+        } finally {
+            setIsModelUploading(false)
+            setModelUploadProgress(0)
+        }
+    }
+
+    const handleConvertOnnx = async () => {
+        setIsModelUploading(true)
+        setModelMsg({ type: "", text: "" })
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/model/convert-onnx', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data.detail || `Convert gagal (${res.status})`)
+            setModelMsg({ type: "success", text: `${data.message} • Reload: ${data.reloaded ? 'OK' : 'gagal'}` })
+            try {
+                const infoRes = await fetch('http://localhost:8000/api/model/info', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                })
+                if (infoRes.ok) setModelInfo(await infoRes.json())
+            } catch (e) { /* ignore */ }
+        } catch (e) {
+            setModelMsg({ type: "error", text: e.message || 'Gagal convert ONNX' })
+        } finally {
+            setIsModelUploading(false)
+        }
+    }
+
+    const handleModelReload = async () => {
+        setIsModelUploading(true)
+        setModelMsg({ type: "", text: "" })
+        try {
+            const token = sessionStorage.getItem('token')
+            const res = await fetch('http://localhost:8000/api/model/reload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) throw new Error(data.detail || `Reload gagal (${res.status})`)
+            setModelMsg({ type: data.reloaded ? "success" : "error", text: data.reloaded ? "Model berhasil di-reload" : "Reload gagal — restart server" })
+        } catch (e) {
+            setModelMsg({ type: "error", text: e.message || 'Gagal reload model' })
+        } finally {
+            setIsModelUploading(false)
+        }
     }
 
     const roleLabel = (role) => {
@@ -1092,6 +1212,154 @@ export default function Settings() {
                                             Menyimpan...
                                         </>
                                     ) : "Simpan"}
+                                </Button>
+                            </CardFooter>
+                        </>
+                    )}
+                </Card>
+
+                {/* Update Model YOLO */}
+                <Card className="overflow-hidden">
+                    <CardHeader className="p-4">
+                        <AccordionHeader
+                            icon={BrainCircuit}
+                            title="Update Model YOLO (best.pt)"
+                            description="Upload file best.pt hasil training baru untuk mengganti model deteksi."
+                            badge={modelInfo?.backend ? `${modelInfo.backend.toUpperCase()} • ${modelInfo.size_mb ?? '?'}MB` : null}
+                            section="model"
+                        />
+                    </CardHeader>
+                    {openSection === "model" && (
+                        <>
+                            <CardContent className="p-4 space-y-4">
+                                {/* Current model info */}
+                                {modelInfo && (
+                                    <div className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Backend aktif:</span>
+                                            <span className="font-medium">{modelInfo.backend?.toUpperCase()}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Ukuran file:</span>
+                                            <span className="font-medium">{modelInfo.size_mb ?? '?'} MB</span>
+                                        </div>
+                                        {modelInfo.modified_at && (
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Terakhir diubah:</span>
+                                                <span className="font-medium">{modelInfo.modified_at}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between gap-2">
+                                            <span className="text-muted-foreground shrink-0">Path:</span>
+                                            <span className="font-mono text-xs text-right break-all">{modelInfo.active_path}</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* File picker */}
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Pilih file .pt</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="file"
+                                            accept=".pt"
+                                            onChange={(e) => {
+                                                const f = e.target.files?.[0]
+                                                setModelFile(f || null)
+                                                setModelMsg({ type: "", text: "" })
+                                            }}
+                                            className="block w-full text-sm text-muted-foreground file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                                        />
+                                    </div>
+                                    {modelFile && (
+                                        <p className="text-xs text-muted-foreground">
+                                            Dipilih: <span className="font-medium text-foreground">{modelFile.name}</span> ({(modelFile.size / 1024 / 1024).toFixed(2)} MB)
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Progress bar */}
+                                {isModelUploading && modelUploadProgress > 0 && (
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted-foreground">Mengupload...</span>
+                                            <span className="font-medium">{modelUploadProgress}%</span>
+                                        </div>
+                                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-primary transition-all"
+                                                style={{ width: `${modelUploadProgress}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Status message */}
+                                {modelMsg.text && (
+                                    <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${modelMsg.type === "success" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-destructive/10 text-destructive"}`}>
+                                        {modelMsg.type === "success" ? <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />}
+                                        <span>{modelMsg.text}</span>
+                                    </div>
+                                )}
+
+                                {/* Convert to ONNX checkbox */}
+                                <label className="flex items-start gap-2 p-3 rounded-lg border bg-primary/5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={convertOnnx}
+                                        onChange={(e) => setConvertOnnx(e.target.checked)}
+                                        className="mt-0.5 w-4 h-4 rounded border-input accent-primary"
+                                    />
+                                    <div className="flex-1">
+                                        <span className="text-sm font-medium">Convert ke ONNX setelah upload</span>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            Otomatis export <code className="font-mono">.pt</code> → <code className="font-mono">.onnx</code>.
+                                            ONNX lebih cepat (~2-3x) untuk inferensi CPU. Default: aktif.
+                                        </p>
+                                    </div>
+                                </label>
+
+                                {/* Warning */}
+                                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400 text-xs">
+                                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="font-medium mb-1">Catatan:</p>
+                                        <ul className="list-disc list-inside space-y-0.5">
+                                            <li>Model lama di-backup ke <code className="font-mono">best.pt.bak</code></li>
+                                            <li>Override ONNX (jika ada) akan dihapus, lalu di-export ulang dari .pt baru</li>
+                                            <li>Detect stream akan reload otomatis (live feed tetap jalan)</li>
+                                            <li>Pastikan kelas output model baru sama (Person, Helmet, dll)</li>
+                                            <li>Convert ONNX butuh ~30-60 detik tergantung ukuran model</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </CardContent>
+                            <CardFooter className="p-4 pt-0 flex items-center gap-2 flex-wrap">
+                                <Button
+                                    onClick={handleModelUpload}
+                                    disabled={!modelFile || isModelUploading}
+                                    className="gap-2"
+                                >
+                                    {isModelUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                    {isModelUploading ? "Mengupload..." : "Upload & Reload"}
+                                </Button>
+                                <Button
+                                    onClick={handleModelReload}
+                                    disabled={isModelUploading}
+                                    variant="outline"
+                                    className="gap-2"
+                                >
+                                    <BrainCircuit className="w-4 h-4" />
+                                    Reload dari Disk
+                                </Button>
+                                <Button
+                                    onClick={handleConvertOnnx}
+                                    disabled={isModelUploading}
+                                    variant="outline"
+                                    className="gap-2"
+                                >
+                                    {isModelUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4" />}
+                                    Convert .pt → .onnx
                                 </Button>
                             </CardFooter>
                         </>

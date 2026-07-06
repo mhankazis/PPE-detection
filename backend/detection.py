@@ -519,3 +519,30 @@ def get_detector() -> PPEDetector:
         print("[PPE Detector] Retrying model load...")
         _detector._load_model()
     return _detector
+
+
+def reload_detector() -> bool:
+    """Reload the YOLO model from disk. Used after model file is replaced.
+
+    Resets the global singleton so the next get_detector() call re-reads
+    MODEL_PATH and re-initializes. Returns True if reload succeeds.
+    """
+    global _detector
+    try:
+        if _detector is not None:
+            try:
+                _detector.model = None
+            except Exception:
+                pass
+        _detector = None
+        # Re-import-safe: re-read module-level MODEL_PATH at call time
+        import sys
+        mod = sys.modules.get(__name__)
+        if mod is not None:
+            mod.MODEL_PATH = mod.ONNX_MODEL_PATH if mod.ONNX_MODEL_PATH.exists() else mod.PT_MODEL_PATH
+            mod.MODEL_BACKEND = "onnx" if mod.ONNX_MODEL_PATH.exists() else "pt"
+        d = get_detector()
+        return d.model is not None
+    except Exception as e:
+        print(f"[PPE Detector] Reload failed: {e}")
+        return False

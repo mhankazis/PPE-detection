@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Response, Depends, HTTPException
+from fastapi import FastAPI, Response, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import time
+import shutil
+import tempfile
+from pathlib import Path
 
 app = FastAPI(title="PPE Detection API (YOLOv11 Backend)")
 
@@ -570,6 +573,157 @@ def update_camera_config(body: CameraConfigRequest, current_user: models.User = 
         "config": _get_camera_config_safe(),
         "test": test,
     }
+
+# ---------- YOLO Model Upload ----------
+@app.get("/api/model/info")
+def model_info(current_user: models.User = Depends(get_current_user)):
+    """Return current YOLO model info (path, backend, file size, mtime)."""
+    from detection import MODEL_PATH, MODEL_BACKEND, ONNX_MODEL_PATH, PT_MODEL_PATH
+    info = {
+        "backend": MODEL_BACKEND,
+        "active_path": str(MODEL_PATH),
+        "onnx_exists": ONNX_MODEL_PATH.exists(),
+        "pt_exists": PT_MODEL_PATH.exists(),
+    }
+    try:
+        p = Path(MODEL_PATH)
+        if p.exists():
+            st = p.stat()
+            info["size_mb"] = round(st.st_size / (1024 * 1024), 2)
+            info["modified_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))
+    except Exception:
+        pass
+    return info
+
+
+def _export_pt_to_onnx(pt_path: Path, onnx_path: Path) -> tuple[bool, str]:
+    """Export a YOLO .pt model to ONNX. Returns (success, message)."""
+    try:
+        from ultralytics import YOLO
+        print(f"[Model Export] Exporting {pt_path} -> ONNX...")
+        model = YOLO(str(pt_path))
+        # opset=12 for broad compatibility, dynamic=False for fixed shape (faster)
+        export_path = model.export(format="onnx", opset=12, dynamic=False, simplify=True)
+        exported = Path(export_path)
+        if exported.exists() and exported.resolve() != onnx_path.resolve():
+            # ultralytics may export to same dir with same stem; move if needed
+            shutil.move(str(exported), str(onnx_path))
+        if not onnx_path.exists():
+            return False, "Export selesai tapi file ONNX tidak ditemukan"
+        size_mb = round(onnx_path.stat().st_size / (1024 * 1024), 2)
+        return True, f"ONNX export berhasil ({size_mb} MB)"
+    except Exception as e:
+        return False, f"Export ONNX gagal: {e}"
+
+
+@app.post("/api/model/upload")
+async def upload_model(
+    file: UploadFile = File(...),
+    convert_onnx: bool = False,
+    current_user: models.User = Depends(get_current_user),
+):
+    """Upload a new YOLO .pt model file, backup the old one, and reload the detector.
+
+    Admin only. Accepts .pt files up to ~500MB. The previous best.pt is
+    backed up to best.pt.bak (last backup only). If convert_onnx=true,
+    also exports to best.onnx (preferred backend for inference speed).
+    """
+    if current_user.role not in ("admin",):
+        raise HTTPException(status_code=403, detail="Hanya admin yang dapat mengganti model")
+
+    if not file.filename or not file.filename.lower().endswith(".pt"):
+        raise HTTPException(status_code=400, detail="File harus berekstensi .pt")
+
+    from detection import PT_MODEL_PATH, ONNX_MODEL_PATH, reload_detector
+
+    # Ensure yolo_models dir exists
+    PT_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove ONNX override so the new .pt is used (will re-export if requested)
+    onnx_removed = False
+    if ONNX_MODEL_PATH.exists():
+        try:
+            ONNX_MODEL_PATH.unlink()
+            onnx_removed = True
+        except Exception as e:
+            print(f"[Model Upload] Warning: could not remove ONNX override: {e}")
+
+    # Backup existing .pt
+    bak_path = PT_MODEL_PATH.with_suffix(".pt.bak")
+    if PT_MODEL_PATH.exists():
+        try:
+            shutil.copy2(str(PT_MODEL_PATH), str(bak_path))
+        except Exception as e:
+            print(f"[Model Upload] Warning: backup failed: {e}")
+
+    # Write uploaded file to temp first, then move (atomic-ish)
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pt", dir=str(PT_MODEL_PATH.parent)) as tmp:
+            tmp_path = Path(tmp.name)
+            total = 0
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                total += len(chunk)
+                if total > 500 * 1024 * 1024:  # 500MB hard limit
+                    tmp.close()
+                    tmp_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="File terlalu besar (maks 500MB)")
+        tmp_path.replace(PT_MODEL_PATH)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal menyimpan file model: {e}")
+
+    # Optional ONNX export
+    onnx_export = {"attempted": convert_onnx, "success": False, "message": ""}
+    if convert_onnx:
+        ok, msg = _export_pt_to_onnx(PT_MODEL_PATH, ONNX_MODEL_PATH)
+        onnx_export["success"] = ok
+        onnx_export["message"] = msg
+
+    # Reload detector (will pick ONNX if export succeeded, else .pt)
+    ok = reload_detector()
+
+    # Determine active backend after reload
+    from detection import MODEL_PATH as _active_path, MODEL_BACKEND as _active_backend
+    return {
+        "message": "Model berhasil diperbarui" if ok else "Model tersimpan tapi reload gagal — restart server",
+        "reloaded": ok,
+        "active_backend": _active_backend,
+        "size_mb": round(PT_MODEL_PATH.stat().st_size / (1024 * 1024), 2),
+        "onnx_override_removed": onnx_removed,
+        "backup_path": str(bak_path) if bak_path.exists() else None,
+        "onnx_export": onnx_export,
+    }
+
+
+@app.post("/api/model/convert-onnx")
+def model_convert_onnx(current_user: models.User = Depends(get_current_user)):
+    """Export current best.pt to best.onnx. Admin only."""
+    if current_user.role not in ("admin",):
+        raise HTTPException(status_code=403, detail="Hanya admin")
+    from detection import PT_MODEL_PATH, ONNX_MODEL_PATH, reload_detector
+    if not PT_MODEL_PATH.exists():
+        raise HTTPException(status_code=404, detail="best.pt tidak ditemukan")
+    ok, msg = _export_pt_to_onnx(PT_MODEL_PATH, ONNX_MODEL_PATH)
+    if not ok:
+        raise HTTPException(status_code=500, detail=msg)
+    reload_ok = reload_detector()
+    return {"success": ok, "message": msg, "reloaded": reload_ok}
+
+
+@app.post("/api/model/reload")
+def model_reload(current_user: models.User = Depends(get_current_user)):
+    """Re-run detector reload from disk (no file change). Admin only."""
+    if current_user.role not in ("admin",):
+        raise HTTPException(status_code=403, detail="Hanya admin")
+    from detection import reload_detector
+    ok = reload_detector()
+    return {"reloaded": ok}
+
 
 if __name__ == "__main__":
     import uvicorn
