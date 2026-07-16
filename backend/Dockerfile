@@ -19,9 +19,11 @@ COPY requirements.txt .
 # Cython/wheel needed to build source distributions such as `lap`.
 RUN pip install --no-cache-dir --upgrade pip cython wheel
 
-# torch CPU wheel from the dedicated index (the default PyPI wheel is the large
-# CUDA build). Installed explicitly rather than via requirements.txt.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# torch + torchvision CPU wheels from the dedicated index (the default PyPI
+# wheels are the large CUDA builds). Installed explicitly and together so the
+# pair is version-matched — ultralytics needs torchvision's ops (e.g. NMS),
+# which are missing otherwise and break model loading.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Remaining dependencies. The `torch` line is filtered out — it is already
 # installed above, its inline `--index-url` is not reliably honoured per-line

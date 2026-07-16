@@ -6,6 +6,11 @@ fastapi
 uvicorn[standard]
 python-multipart
 
+# Auth & runtime — JWT (auth.py), password hashing, perf metrics (perf_router)
+python-jose[cryptography]
+bcrypt
+psutil
+
 # Database
 sqlite-utils
 SQLAlchemy
