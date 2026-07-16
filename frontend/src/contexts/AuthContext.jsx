@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { API_BASE } from '@/lib/api';
 
 const AuthContext = createContext();
 
@@ -11,7 +12,7 @@ export function AuthProvider({ children }) {
         const token = sessionStorage.getItem('token');
         if (!token) return null;
         try {
-            const res = await fetch('http://localhost:8000/api/auth/me', {
+            const res = await fetch(API_BASE + '/api/auth/me', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -57,7 +58,7 @@ export function AuthProvider({ children }) {
             formData.append('username', username);
             formData.append('password', password);
 
-            const response = await fetch('http://localhost:8000/api/auth/login', {
+            const response = await fetch(API_BASE + '/api/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

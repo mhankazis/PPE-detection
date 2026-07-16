@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Users, Upload, Image as ImageIcon, X, Save, Camera, Plus, List as ListIcon, Trash2, User, Pencil, Video, CheckCircle, AlertCircle, Eye, ImageOff } from "lucide-react"
 
-const API_BASE = "http://localhost:8000"
+const API_BASE = import.meta.env.VITE_API_BASE || ""
 
 export default function Students() {
     const [activeTab, setActiveTab] = useState('list') // 'list' | 'add'
@@ -38,7 +38,7 @@ export default function Students() {
         setIsLoading(true)
         try {
             const token = sessionStorage.getItem('token')
-            const response = await fetch('http://localhost:8000/api/students', {
+            const response = await fetch(API_BASE + '/api/students', {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -274,7 +274,7 @@ export default function Students() {
         setEditingId(student.id)
         setFormData({ name: student.name, nis: student.nim, class: student.kelas || '' })
         const photoUrl = student.photo_path
-            ? `http://localhost:8000/${student.photo_path.replace(/\\/g, '/')}`
+            ? `${API_BASE}/${student.photo_path.replace(/\\/g, '/')}`
             : null
         setPreviewUrl(photoUrl)
         setOriginalPhotoUrl(photoUrl) // remember initial state
@@ -287,7 +287,7 @@ export default function Students() {
 
         try {
             const token = sessionStorage.getItem('token')
-            const response = await fetch(`http://localhost:8000/api/students/${id}`, {
+            const response = await fetch(`${API_BASE}/api/students/${id}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -376,8 +376,8 @@ export default function Students() {
             }
 
             const url = editingId
-                ? `http://localhost:8000/api/students/${editingId}`
-                : 'http://localhost:8000/api/students'
+                ? `${API_BASE}/api/students/${editingId}`
+                : API_BASE + '/api/students'
 
             const method = editingId ? 'PUT' : 'POST'
 
@@ -474,7 +474,7 @@ export default function Students() {
                                         <tr key={student.id} className="hover:bg-muted/50 transition-colors">
                                             <td className="px-6 py-4">
                                                 {student.photo_path ? (
-                                                    <img src={`http://localhost:8000/${student.photo_path.replace(/\\/g, '/')}`} alt={student.name} className="w-10 h-10 rounded-full object-cover border" />
+                                                    <img src={`${API_BASE}/${student.photo_path.replace(/\\/g, '/')}`} alt={student.name} className="w-10 h-10 rounded-full object-cover border" />
                                                 ) : (
                                                     <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center border">
                                                         <User className="w-5 h-5 text-muted-foreground" />

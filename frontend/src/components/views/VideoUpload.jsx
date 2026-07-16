@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react"
 import { Upload, FileVideo, X, Play, Info, CheckCircle2, AlertTriangle, Shield, ShieldAlert, Loader2, Clock, Users, BarChart3, Filter, Zap, Download, Camera, Check, Trash2, Send } from "lucide-react"
 
-const API_BASE = "http://localhost:8000"
+const API_BASE = import.meta.env.VITE_API_BASE || ""
 
 const ALL_CLASSES = ['Person', 'Helmet', 'Uniform', 'Hijab', 'Glasses']
 

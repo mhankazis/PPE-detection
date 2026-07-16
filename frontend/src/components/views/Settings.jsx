@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+import { API_BASE } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "../../contexts/AuthContext"
@@ -84,7 +85,7 @@ export default function Settings() {
         const fetchSirenConfig = async () => {
             try {
                 const token = sessionStorage.getItem('token')
-                const res = await fetch('http://localhost:8000/api/ezviz-config', {
+                const res = await fetch(API_BASE + '/api/ezviz-config', {
                     headers: { 'Authorization': `Bearer ${token}` }
                 })
                 if (res.ok) {
@@ -104,7 +105,7 @@ export default function Settings() {
         const fetchCameraConfig = async () => {
             try {
                 const token = sessionStorage.getItem('token')
-                const res = await fetch('http://localhost:8000/api/camera/config', {
+                const res = await fetch(API_BASE + '/api/camera/config', {
                     headers: { 'Authorization': `Bearer ${token}` },
                 })
                 if (res.ok) {
@@ -124,7 +125,7 @@ export default function Settings() {
         const fetchModelInfo = async () => {
             try {
                 const token = sessionStorage.getItem('token')
-                const res = await fetch('http://localhost:8000/api/model/info', {
+                const res = await fetch(API_BASE + '/api/model/info', {
                     headers: { 'Authorization': `Bearer ${token}` },
                 })
                 if (res.ok) setModelInfo(await res.json())
@@ -151,7 +152,7 @@ export default function Settings() {
         setIsCameraTesting(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/camera/test', {
+            const res = await fetch(API_BASE + '/api/camera/test', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -184,7 +185,7 @@ export default function Settings() {
         setIsCameraSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/camera/config', {
+            const res = await fetch(API_BASE + '/api/camera/config', {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -234,7 +235,7 @@ export default function Settings() {
         setIsSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/auth/me', {
+            const res = await fetch(API_BASE + '/api/auth/me', {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -272,7 +273,7 @@ export default function Settings() {
         setIsEmailSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/auth/request-email-change', {
+            const res = await fetch(API_BASE + '/api/auth/request-email-change', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -305,7 +306,7 @@ export default function Settings() {
         setIsEmailSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/auth/confirm-email-change', {
+            const res = await fetch(API_BASE + '/api/auth/confirm-email-change', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -342,7 +343,7 @@ export default function Settings() {
     const handleCancelEmailChange = async () => {
         const token = sessionStorage.getItem('token')
         try {
-            await fetch('http://localhost:8000/api/auth/cancel-email-change', {
+            await fetch(API_BASE + '/api/auth/cancel-email-change', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
             })
@@ -365,7 +366,7 @@ export default function Settings() {
 
         const token = sessionStorage.getItem('token')
         try {
-            const res = await fetch('http://localhost:8000/api/perf/benchmark', {
+            const res = await fetch(API_BASE + '/api/perf/benchmark', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -393,7 +394,7 @@ export default function Settings() {
         const token = sessionStorage.getItem('token')
         benchPollRef.current = setInterval(async () => {
             try {
-                const res = await fetch(`http://localhost:8000/api/perf/benchmark/${jobId}`, {
+                const res = await fetch(`${API_BASE}/api/perf/benchmark/${jobId}`, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 })
                 const data = await res.json()
@@ -438,7 +439,7 @@ export default function Settings() {
             const formData = new FormData()
             formData.append('file', modelFile)
 
-            const url = `http://localhost:8000/api/model/upload?convert_onnx=${convertOnnx ? 'true' : 'false'}`
+            const url = `${API_BASE}/api/model/upload?convert_onnx=${convertOnnx ? 'true' : 'false'}`
             const res = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest()
                 xhr.open('POST', url)
@@ -469,7 +470,7 @@ export default function Settings() {
             setModelFile(null)
             // Refresh model info
             try {
-                const infoRes = await fetch('http://localhost:8000/api/model/info', {
+                const infoRes = await fetch(API_BASE + '/api/model/info', {
                     headers: { 'Authorization': `Bearer ${token}` },
                 })
                 if (infoRes.ok) setModelInfo(await infoRes.json())
@@ -487,7 +488,7 @@ export default function Settings() {
         setModelMsg({ type: "", text: "" })
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/model/convert-onnx', {
+            const res = await fetch(API_BASE + '/api/model/convert-onnx', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
             })
@@ -495,7 +496,7 @@ export default function Settings() {
             if (!res.ok) throw new Error(data.detail || `Convert gagal (${res.status})`)
             setModelMsg({ type: "success", text: `${data.message} • Reload: ${data.reloaded ? 'OK' : 'gagal'}` })
             try {
-                const infoRes = await fetch('http://localhost:8000/api/model/info', {
+                const infoRes = await fetch(API_BASE + '/api/model/info', {
                     headers: { 'Authorization': `Bearer ${token}` },
                 })
                 if (infoRes.ok) setModelInfo(await infoRes.json())
@@ -512,7 +513,7 @@ export default function Settings() {
         setModelMsg({ type: "", text: "" })
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/model/reload', {
+            const res = await fetch(API_BASE + '/api/model/reload', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
             })
@@ -537,7 +538,7 @@ export default function Settings() {
         setIsSirenSaving(true)
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/ezviz-config', {
+            const res = await fetch(API_BASE + '/api/ezviz-config', {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -591,7 +592,7 @@ export default function Settings() {
         playTestSiren()
         try {
             const token = sessionStorage.getItem('token')
-            const res = await fetch('http://localhost:8000/api/ezviz-test', {
+            const res = await fetch(API_BASE + '/api/ezviz-test', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
             })

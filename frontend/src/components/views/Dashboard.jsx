@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { AlertCircle, Camera, CheckCircle2, TrendingUp, Users, ShieldAlert, ShieldCheck, BarChart3, X, Loader2, User, Clock, Video, Activity, Pencil, Calendar } from "lucide-react"
 
-const API_BASE = "http://localhost:8000"
+const API_BASE = import.meta.env.VITE_API_BASE || ""
 
 export default function Dashboard() {
     const navigate = useNavigate()

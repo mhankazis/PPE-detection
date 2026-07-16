@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShieldAlert, Mail, KeyRound, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import { ModeToggle } from '../mode-toggle';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 export default function ForgotPassword() {
     const navigate = useNavigate();

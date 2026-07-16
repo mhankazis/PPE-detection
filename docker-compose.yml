@@ -1,0 +1,75 @@
+# PPE Detection — full stack (MySQL + FastAPI backend + nginx frontend).
+#
+# Quick start:
+#   cp .env.example .env   # optional — defaults below already let it run as-is
+#   docker compose up --build
+#   -> open http://localhost:${WEB_PORT:-8088}   (login: admin / admin123)
+#
+# The backend talks to MySQL using DB_* vars (see backend/database.py).
+# Values come from a root .env if present, otherwise the :-defaults below.
+services:
+  # ------------------------------------------------------------------
+  # MySQL 8.0 — bundled by default. Port 3306 is NOT published to the host,
+  # so it will NOT clash with any MySQL already on the server.
+  # >>> To use an EXTERNAL MySQL (e.g. the school server's own):
+  #     1. Comment out this whole `db` service.
+  #     2. On the `backend` service below, delete the `depends_on` block.
+  #     3. Set DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME in .env to
+  #        point at that server, and import backend/schema.sql into it once.
+  # ------------------------------------------------------------------
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ppe_detection}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-changeme}", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-root}
+      # Defaults to the bundled MySQL root password so the two never drift;
+      # set DB_PASSWORD explicitly when pointing at an external MySQL.
+      DB_PASSWORD: ${DB_PASSWORD:-${MYSQL_ROOT_PASSWORD:-changeme}}
+      DB_NAME: ${DB_NAME:-ppe_detection}
+      # SMTP (optional — empty = email/OTP disabled, app still runs).
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Deteksi APD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+    volumes:
+      - uploads_data:/app/.uploads
+    # Backend listens on 8000 *inside* the container and is NOT exposed to the
+    # host by default — the frontend (nginx) reverse-proxies /api to it.
+    # Uncomment to reach the API directly (default host port 9000, not 8000):
+    # ports:
+    #   - "${BACKEND_PORT:-9000}:8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # The only port exposed to the host. Change WEB_PORT in .env if taken.
+      - "${WEB_PORT:-8088}:80"
+
+volumes:
+  db_data:
+  uploads_data:

@@ -1,0 +1,16 @@
+# Python caches / venvs
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Logs & local secrets
+*.log
+ezviz_config.json
+.env
+
+# Local DB files (use the MySQL container instead)
+*.db
+*.sqlite3

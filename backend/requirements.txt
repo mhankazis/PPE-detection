@@ -10,6 +10,8 @@ python-multipart
 sqlite-utils
 SQLAlchemy
 PyMySQL
+# Required by PyMySQL to authenticate against MySQL 8 (caching_sha2_password).
+cryptography
 python-dotenv
 email-validator
 

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react"
+import { API_BASE } from "@/lib/api"
 import { useSearchParams } from "react-router-dom"
 import {
     Table,
@@ -66,7 +67,7 @@ export default function Logs() {
         setIsLoading(true);
         try {
             const token = sessionStorage.getItem('token');
-            const res = await fetch('http://localhost:8000/api/logs', {
+            const res = await fetch(API_BASE + '/api/logs', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -83,7 +84,7 @@ export default function Logs() {
     const fetchStudents = async () => {
         try {
             const token = sessionStorage.getItem('token');
-            const res = await fetch('http://localhost:8000/api/students', {
+            const res = await fetch(API_BASE + '/api/students', {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -204,7 +205,7 @@ export default function Logs() {
         setSelectedImage(null)
         setRemoveImage(false)
         if (log.image_path) {
-            setPreviewUrl(`http://localhost:8000/${log.image_path.replace(/\\/g, '/')}`)
+            setPreviewUrl(`${API_BASE}/${log.image_path.replace(/\\/g, '/')}`)
         } else {
             setPreviewUrl(null)
         }
@@ -234,7 +235,7 @@ export default function Logs() {
         if (window.confirm("Apakah Anda yakin ingin menghapus log ini?")) {
             try {
                 const token = sessionStorage.getItem('token');
-                await fetch(`http://localhost:8000/api/logs/${id}`, {
+                await fetch(`${API_BASE}/api/logs/${id}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -268,7 +269,7 @@ export default function Logs() {
         if (!window.confirm(`Hapus ${selectedIds.size} log yang dipilih?`)) return
         try {
             const token = sessionStorage.getItem('token')
-            await fetch('http://localhost:8000/api/logs/bulk-delete', {
+            await fetch(API_BASE + '/api/logs/bulk-delete', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ log_numbers: [...selectedIds] })
@@ -291,7 +292,7 @@ export default function Logs() {
             const params = new URLSearchParams()
             if (bulkSeverity) params.append('severity', bulkSeverity)
             if (bulkStatus) params.append('status', bulkStatus)
-            await fetch(`http://localhost:8000/api/logs/bulk-update?${params.toString()}`, {
+            await fetch(`${API_BASE}/api/logs/bulk-update?${params.toString()}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ log_numbers: [...selectedIds] })
@@ -319,7 +320,7 @@ export default function Logs() {
                 payload.append('file', selectedImage);
             }
 
-            const response = await fetch('http://localhost:8000/api/logs', {
+            const response = await fetch(API_BASE + '/api/logs', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -356,7 +357,7 @@ export default function Logs() {
                 payload.append('file', selectedImage);
             }
 
-            const response = await fetch(`http://localhost:8000/api/logs/${formData.id}`, {
+            const response = await fetch(`${API_BASE}/api/logs/${formData.id}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`
@@ -758,7 +759,7 @@ export default function Logs() {
                                                         <div className="aspect-video w-full bg-muted rounded-lg overflow-hidden relative group">
                                                             {selectedLog?.image_path ? (
                                                                 <img
-                                                                    src={`http://localhost:8000/${selectedLog.image_path.replace(/\\/g, '/')}`}
+                                                                    src={`${API_BASE}/${selectedLog.image_path.replace(/\\/g, '/')}`}
                                                                     alt="Snapshot pelanggaran"
                                                                     className="w-full h-full object-contain bg-black/90"
                                                                 />

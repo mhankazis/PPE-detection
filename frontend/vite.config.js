@@ -10,4 +10,13 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Dev only: proxy API + served uploads to the local backend so relative
+  // URLs (API_BASE = "") work the same as in production (nginx proxy).
+  server: {
+    proxy: {
+      "/api": "http://localhost:8000",
+      "/.uploads": "http://localhost:8000",
+      "/uploads": "http://localhost:8000",
+    },
+  },
 })

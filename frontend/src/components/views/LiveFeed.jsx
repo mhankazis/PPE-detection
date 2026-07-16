@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Camera, Maximize, AlertTriangle, ShieldCheck, Loader2, ShieldAlert, Eye, EyeOff, Scan, Plug, Unplug, Bell, BellOff } from "lucide-react"
 import { useAlarmSound } from "../../hooks/useAlarmSound"
 
-const API_BASE = "http://localhost:8000"
+const API_BASE = import.meta.env.VITE_API_BASE || ""
 
 export default function LiveFeed() {
     const [isStreamLoading, setIsStreamLoading] = useState(false)

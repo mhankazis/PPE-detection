@@ -5,7 +5,7 @@ import { useRef, useState, useCallback, useEffect } from "react"
  * Generates oscillating siren tone (no MP3 file needed).
  * Polls backend /api/alarm/status and plays sound when active.
  */
-export function useAlarmSound(apiBase = "http://localhost:8000", enabled = true) {
+export function useAlarmSound(apiBase = "", enabled = true) {
     const audioCtxRef = useRef(null)
     const oscillatorRef = useRef(null)
     const gainRef = useRef(null)
