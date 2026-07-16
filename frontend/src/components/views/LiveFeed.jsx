@@ -11,8 +11,10 @@ export default function LiveFeed() {
     const [isStreamLoading, setIsStreamLoading] = useState(false)
     const [detectionMode, setDetectionMode] = useState(false)
     const [isConnected, setIsConnected] = useState(false)
+    const [liveMetrics, setLiveMetrics] = useState(null)
     const imgRef = useRef(null)
     const loadingTimerRef = useRef(null)
+    const metricsTimerRef = useRef(null)
     const { isPlaying, acknowledge } = useAlarmSound(API_BASE, detectionMode)
 
     // Cleanup the stream when navigating away to prevent hanging requests
@@ -24,10 +26,44 @@ export default function LiveFeed() {
             if (loadingTimerRef.current) {
                 clearTimeout(loadingTimerRef.current);
             }
+            if (metricsTimerRef.current) {
+                clearInterval(metricsTimerRef.current);
+            }
             // Stop backend camera on unmount
             fetch(`${API_BASE}/api/camera/stop`, { method: "POST" }).catch(() => { })
         }
     }, [])
+
+    // Poll live metrics every 500ms while detection mode is active
+    useEffect(() => {
+        if (!detectionMode) {
+            setLiveMetrics(null)
+            if (metricsTimerRef.current) {
+                clearInterval(metricsTimerRef.current)
+                metricsTimerRef.current = null
+            }
+            return
+        }
+
+        const fetchMetrics = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/perf/live-metrics`, {
+                    headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` }
+                })
+                if (res.ok) setLiveMetrics(await res.json())
+            } catch (e) { /* silent */ }
+        }
+
+        fetchMetrics()
+        metricsTimerRef.current = setInterval(fetchMetrics, 500)
+
+        return () => {
+            if (metricsTimerRef.current) {
+                clearInterval(metricsTimerRef.current)
+                metricsTimerRef.current = null
+            }
+        }
+    }, [detectionMode])
 
     // When toggling detection mode while connected, show loading briefly.
     // MJPEG onLoad fires only on first frame; safety timeout guarantees dismissal.
@@ -215,6 +251,38 @@ export default function LiveFeed() {
                             <div className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600/80 backdrop-blur-sm text-white text-xs font-semibold shadow-lg">
                                 <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                                 YOLO DETECTION ACTIVE
+                            </div>
+                        )}
+
+                        {/* Performance HUD — top-right overlay */}
+                        {detectionMode && liveMetrics && liveMetrics.is_active && (
+                            <div className="absolute top-4 right-4 z-20 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-sm text-white font-mono text-xs shadow-lg border border-white/10 min-w-[180px]">
+                                <div className="flex items-center justify-between gap-3 mb-1">
+                                    <span className="text-green-400 font-semibold">FPS</span>
+                                    <span className={liveMetrics.fps >= 15 ? "text-green-400" : liveMetrics.fps >= 8 ? "text-yellow-400" : "text-red-400"}>
+                                        {liveMetrics.fps.toFixed(1)}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 mb-1">
+                                    <span className="text-cyan-400 font-semibold">Infer</span>
+                                    <span className="text-cyan-100">{liveMetrics.inference_ms.toFixed(1)} ms</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 mb-1">
+                                    <span className="text-purple-400 font-semibold">Total</span>
+                                    <span className="text-purple-100">{liveMetrics.total_ms.toFixed(1)} ms</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 mb-1">
+                                    <span className="text-orange-400 font-semibold">Dets</span>
+                                    <span className="text-orange-100">{liveMetrics.detections_per_frame.toFixed(1)}/f</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 pt-1 border-t border-white/10">
+                                    <span className="text-gray-400">Res</span>
+                                    <span className="text-gray-200">{liveMetrics.resolution}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-gray-400">Frames</span>
+                                    <span className="text-gray-200">{liveMetrics.frame_count}</span>
+                                </div>
                             </div>
                         )}
 

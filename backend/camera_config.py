@@ -130,11 +130,15 @@ def test_connection(ip: str = None, port: int = None, timeout: float = 8.0) -> d
 
     url = f"rtsp://{cfg['username']}:{cfg['password']}@{cfg['ip']}:{cfg['port']}{cfg.get('path', '/Streaming/Channels/102')}"
 
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+    # FFmpeg options: TCP transport + socket timeout (microseconds).
+    # stimeout handles RTSP TCP read timeout — prevents VideoCapture from
+    # blocking forever when the camera is online at TCP level but the RTSP
+    # server is unresponsive/hung. Timeout is in microseconds.
+    timeout_us = int(timeout * 1_000_000)
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;tcp|stimeout;{timeout_us}"
     cap = None
     try:
         cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-        # Set timeout via property (best-effort, not all backends honor it)
         if not cap.isOpened():
             return {"ok": False, "message": f"Tidak bisa membuka stream RTSP. Periksa IP {cfg['ip']}:{cfg['port']} dan kredensial.", "resolution": None, "fps": None}
 

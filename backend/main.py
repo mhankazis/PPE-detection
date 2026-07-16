@@ -379,7 +379,10 @@ class CameraStream:
     def _update(self):
         import os
         import time
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        # stimeout = socket timeout for RTSP TCP reads (microseconds).
+        # Prevents VideoCapture from blocking forever when camera TCP port
+        # is open but RTSP server is unresponsive. 10s = 10_000_000 μs.
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;10000000"
         url = CAMERA_URL()  # Read dynamically from camera_config
         print(f"Connecting to camera at {url}...")
         self.camera = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
@@ -549,29 +552,35 @@ def update_camera_config(body: CameraConfigRequest, current_user: models.User = 
 
     Flow:
       1. Validate IP/port format (pydantic).
-      2. Test connection to new IP — reject if fails.
-      3. Save to camera_config.json.
-      4. Stop existing CameraStream (releases old RTSP).
-      5. Next /api/video_feed request will auto-start stream with new URL.
+      2. Save to camera_config.json immediately.
+      3. Stop existing CameraStream in background (non-blocking).
+      4. Next /api/video_feed request will auto-start stream with new URL.
+
+    NOTE: We DO NOT call test_connection here. cv2.VideoCapture() on Windows
+    ffmpeg can block 30s+ even with stimeout (Windows builds often ignore it
+    for RTSP TCP). The user should use the "Test Koneksi" button first if
+    they want to verify reachability. Saving must be instant.
     """
-    # Test connection first — don't save if unreachable
-    test = _test_camera_connection(ip=body.ip, port=body.port, timeout=8.0)
-    if not test["ok"]:
-        raise HTTPException(status_code=400, detail=test["message"])
+    # Persist immediately
+    _update_camera_ip(body.ip, body.port)
 
-    # Persist
-    new_url = _update_camera_ip(body.ip, body.port)
-
-    # Restart stream so it picks up new URL
-    try:
-        camera_stream.stop()
-    except Exception as e:
-        print(f"[Camera Config] Warning: stop_stream failed: {e}")
+    # Restart stream in BACKGROUND thread.
+    # camera_stream.stop() can block up to 30s if the old RTSP connection is hung
+    # (ffmpeg VideoCapture constructor has no default TCP timeout). Running it
+    # in a daemon thread ensures the HTTP response returns immediately so the
+    # frontend doesn't get stuck on "Menyimpan...".
+    import threading as _threading
+    def _bg_stop():
+        try:
+            camera_stream.stop()
+            print("[Camera Config] Old stream stopped (background).")
+        except Exception as e:
+            print(f"[Camera Config] Background stop_stream failed: {e}")
+    _threading.Thread(target=_bg_stop, daemon=True).start()
 
     return {
         "message": f"IP kamera diperbarui ke {body.ip}:{body.port}. Stream akan terhubung ulang otomatis.",
         "config": _get_camera_config_safe(),
-        "test": test,
     }
 
 # ---------- YOLO Model Upload ----------

@@ -612,6 +612,46 @@ LIVE_FACE_REC_INTERVAL = 0.6     # Run face recognition at most every N seconds 
 LIVE_FACE_DET_SIZE = 320         # InsightFace det_size for live (lower = faster, minor accuracy tradeoff)
 
 
+# --- Live performance metrics (EMA-based, near-zero overhead) ---
+# Updated by _generate_detection_frames each detection cycle. Read via
+# /api/perf/live-metrics endpoint. Single writer (generator) → no lock needed.
+_live_metrics = {
+    "fps": 0.0,                # EMA frames-per-second (end-to-end loop)
+    "inference_ms": 0.0,       # EMA YOLO + postprocess time per detection
+    "total_ms": 0.0,           # EMA full loop time (grab + infer + encode)
+    "frame_count": 0,          # total frames yielded since stream start
+    "last_frame_ts": 0.0,      # unix ts of last yielded frame
+    "width": 0,                # stream resolution width
+    "height": 0,               # stream resolution height
+    "detections_per_frame": 0, # EMA count of detections per frame
+}
+
+
+def update_live_metrics(infer_ms: float, total_ms: float, frame_w: int, frame_h: int, num_dets: int) -> None:
+    """Update EMA metrics. Called once per detection cycle."""
+    alpha = 0.1  # smoothing factor — 10% new, 90% old
+    _live_metrics["inference_ms"] = _live_metrics["inference_ms"] * (1 - alpha) + infer_ms * alpha
+    _live_metrics["total_ms"] = _live_metrics["total_ms"] * (1 - alpha) + total_ms * alpha
+    _live_metrics["detections_per_frame"] = _live_metrics["detections_per_frame"] * (1 - alpha) + num_dets * alpha
+    _live_metrics["width"] = frame_w
+    _live_metrics["height"] = frame_h
+    _live_metrics["frame_count"] += 1
+    _live_metrics["last_frame_ts"] = time.time()
+    # FPS from total_ms (end-to-end): 1000 / total_ms
+    if _live_metrics["total_ms"] > 0:
+        _live_metrics["fps"] = 1000.0 / _live_metrics["total_ms"]
+
+
+def reset_live_metrics() -> None:
+    """Reset metrics when stream stops."""
+    _live_metrics["fps"] = 0.0
+    _live_metrics["inference_ms"] = 0.0
+    _live_metrics["total_ms"] = 0.0
+    _live_metrics["frame_count"] = 0
+    _live_metrics["last_frame_ts"] = 0.0
+    _live_metrics["detections_per_frame"] = 0.0
+
+
 def _generate_detection_frames():
     """
     Generator that yields MJPEG frames with YOLO detection overlay.
@@ -622,6 +662,7 @@ def _generate_detection_frames():
     - Downscaling for faster YOLO inference
     - Lower JPEG quality for faster encoding
     - No sleep when frames are immediately available
+    - EMA metrics instrumentation (near-zero overhead)
     """
     from detection import get_detector
     import main as main_module
@@ -816,10 +857,12 @@ def _generate_detection_frames():
             if should_detect:
                 last_frame_id = frame_id
                 last_detect_time = now
+                _t_infer_start = time.time()
                 try:
                     # Run YOLO with ByteTrack tracking — assigns stable tracker_id
                     # per person across frames (replaces bbox-center pseudo-tracker).
                     _, detections, compliance = detector.detect_frame_tracked(raw_frame, annotate=False)
+                    _t_infer_end = time.time()
                     last_detections = detections
                     last_compliance = compliance
 
@@ -916,6 +959,20 @@ def _generate_detection_frames():
             _, buffer = cv2.imencode('.jpg', out_frame,
                                      [cv2.IMWRITE_JPEG_QUALITY, LIVE_JPEG_QUALITY])
             frame_bytes = buffer.tobytes()
+
+            # Update live metrics (only when detection ran this cycle)
+            if should_detect:
+                _t_total_end = time.time()
+                _infer_ms = (_t_infer_end - _t_infer_start) * 1000.0
+                _total_ms = (_t_total_end - loop_start) * 1000.0
+                _h, _w = raw_frame.shape[:2]
+                update_live_metrics(
+                    infer_ms=_infer_ms,
+                    total_ms=_total_ms,
+                    frame_w=_w,
+                    frame_h=_h,
+                    num_dets=len(last_detections),
+                )
 
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')

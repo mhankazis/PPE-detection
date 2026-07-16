@@ -195,7 +195,6 @@ export default function Settings() {
             const data = await res.json()
             if (res.ok) {
                 setCameraCurrent(data.config)
-                setCameraTestResult(data.test)
                 setCameraMsg({ type: "success", text: data.message || "IP kamera berhasil disimpan." })
             } else {
                 setCameraMsg({ type: "error", text: data.detail || "Gagal menyimpan IP kamera." })
