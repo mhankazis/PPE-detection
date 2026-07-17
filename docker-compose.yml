@@ -25,7 +25,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-ppe_detection}
     volumes:
       - db_data:/var/lib/mysql
-      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/ppe_detection_dump.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-changeme}", "--silent"]
       interval: 10s
