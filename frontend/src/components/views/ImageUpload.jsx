@@ -3,7 +3,7 @@ import { Upload, Image as ImageIcon, X, ZoomIn, Info, CheckCircle2, AlertTriangl
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""
 
-const ALL_CLASSES = ['Person', 'Helmet', 'Uniform', 'Hijab', 'Glasses']
+const ALL_CLASSES = ['Person', 'Helmet', 'Uniform', 'Hijab']
 
 // CSS classes for filter buttons
 const CLASS_BADGE_COLORS = {
@@ -11,7 +11,6 @@ const CLASS_BADGE_COLORS = {
     Helmet: 'bg-green-500',
     Uniform: 'bg-teal-500',
     Hijab: 'bg-fuchsia-500',
-    Glasses: 'bg-yellow-500',
 }
 
 // Canvas drawing colors (hex)
@@ -20,7 +19,6 @@ const CLASS_DRAW_COLORS = {
     Helmet: '#22c55e',
     Uniform: '#14b8a6',
     Hijab: '#d946ef',
-    Glasses: '#eab308',
 }
 
 // English (backend) → Indonesian (UI) translation for PPE labels.
@@ -28,7 +26,6 @@ const PPE_TO_ID = {
     Helmet: 'Helm',
     Uniform: 'Seragam',
     Hijab: 'Hijab',
-    Glasses: 'Kacamata',
     Person: 'Orang',
 }
 const ppeToId = (label) => PPE_TO_ID[label] || label

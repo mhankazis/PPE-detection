@@ -411,7 +411,6 @@ async def detect_video_annotated(video_filename: str = Form(...)):
             "Helmet": (74, 222, 128),     # green
             "Uniform": (20, 184, 166),    # teal
             "Hijab": (239, 68, 239),      # fuchsia
-            "Glasses": (0, 194, 255),     # orange-ish
         }
 
         while True:

@@ -330,7 +330,6 @@ export default function LiveFeed() {
                                                 { label: 'Helmet', color: 'bg-green-500', required: true },
                                                 { label: 'Uniform', color: 'bg-teal-500', required: true },
                                                 { label: 'Hijab', color: 'bg-fuchsia-500', required: false },
-                                                { label: 'Glasses', color: 'bg-yellow-500', required: false },
                                             ].map(item => (
                                                 <div key={item.label} className="flex items-center justify-between text-xs p-2 rounded-lg bg-muted/30">
                                                     <span className="flex items-center gap-2">
