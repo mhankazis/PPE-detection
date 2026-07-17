@@ -3,14 +3,13 @@ import { Upload, FileVideo, X, Play, Info, CheckCircle2, AlertTriangle, Shield, 
 
 const API_BASE = "http://localhost:8000"
 
-const ALL_CLASSES = ['Person', 'Helmet', 'Uniform', 'Hijab', 'Glasses']
+const ALL_CLASSES = ['Person', 'Helmet', 'Uniform', 'Hijab']
 
 const CLASS_BADGE_COLORS = {
     Person: 'bg-blue-500',
     Helmet: 'bg-green-500',
     Uniform: 'bg-teal-500',
     Hijab: 'bg-fuchsia-500',
-    Glasses: 'bg-yellow-500',
 }
 
 const CLASS_DRAW_COLORS = {
@@ -18,7 +17,6 @@ const CLASS_DRAW_COLORS = {
     Helmet: '#22c55e',
     Uniform: '#14b8a6',
     Hijab: '#d946ef',
-    Glasses: '#eab308',
 }
 
 // English (backend) → Indonesian (UI) translation for PPE labels.
@@ -26,7 +24,6 @@ const PPE_TO_ID = {
     Helmet: 'Helm',
     Uniform: 'Seragam',
     Hijab: 'Hijab',
-    Glasses: 'Kacamata',
     Person: 'Orang',
 }
 const ppeToId = (label) => PPE_TO_ID[label] || label

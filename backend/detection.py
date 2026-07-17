@@ -3,8 +3,8 @@ YOLOv11 PPE Detection Engine
 Loads the trained best.pt model and provides detection functions
 for image, video frame, and live feed processing.
 
-Classes: Helmet, Uniform, Hijab, Glasses, Person
-PPE Completeness: Helmet + Uniform = Required; Hijab, Glasses = Informational
+Classes: Helmet, Uniform, Hijab, Person
+PPE Completeness: Helmet + Uniform = Required; Hijab = Informational
 """
 
 import os
@@ -31,7 +31,6 @@ CLASS_COLORS = {
     "Helmet":  (0, 200, 0),      # Green
     "Uniform": (200, 150, 0),    # Teal/Cyan
     "Hijab":   (200, 0, 200),    # Magenta
-    "Glasses": (0, 200, 255),    # Yellow
     "Person":  (255, 100, 0),    # Blue
 }
 
@@ -44,7 +43,6 @@ PPE_TO_ID = {
     "Helmet":  "Helm",
     "Uniform": "Seragam",
     "Hijab":   "Hijab",
-    "Glasses": "Kacamata",
 }
 
 
@@ -53,7 +51,7 @@ def ppe_to_id(label: str) -> str:
     return PPE_TO_ID.get(label, label)
 
 # Informational PPE items (reported if detected, not flagged if missing)
-INFORMATIONAL_PPE = {"Hijab", "Glasses"}
+INFORMATIONAL_PPE = {"Hijab"}
 
 
 class PPEDetector:

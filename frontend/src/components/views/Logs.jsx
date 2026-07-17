@@ -21,11 +21,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Filter, Search, Download, Eye, Calendar, Plus, Pencil, Trash2, ArrowUpDown, ChevronDown, ChevronUp, X, CheckSquare, Square, Trash, AlertTriangle } from "lucide-react"
 
-const availableViolations = ["Helm", "Seragam", "Kacamata"]
+const availableViolations = ["Helm", "Seragam"]
 
 // Mapping for backend format (Indonesian → English class names)
-const violationToEnglish = { "Helm": "Helmet", "Seragam": "Uniform", "Kacamata": "Glasses" }
-const violationFromEnglish = { "Helmet": "Helm", "Uniform": "Seragam", "Glasses": "Kacamata" }
+const violationToEnglish = { "Helm": "Helmet", "Seragam": "Uniform" }
+const violationFromEnglish = { "Helmet": "Helm", "Uniform": "Seragam" }
 
 export default function Logs() {
     const [logs, setLogs] = useState([])
