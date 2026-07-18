@@ -17,7 +17,7 @@ function App() {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <AuthProvider>
-        <Router>
+        <Router basename={import.meta.env.BASE_URL.replace(/\/+$/, "") || "/"}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
