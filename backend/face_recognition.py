@@ -239,7 +239,7 @@ class FaceRecognizer:
 
         # Save photo to dataset directory
         import time
-        filename = f"student_{student_id}_{int(time.time())}.jpg"
+        filename = f"student_{student_id}_{time.time_ns()}.jpg"
         filepath = os.path.join(DATASET_DIR, filename)
         cv2.imwrite(filepath, frame)
 
